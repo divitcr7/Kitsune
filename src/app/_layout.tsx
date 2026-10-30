@@ -11,6 +11,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { iconFont } from '@/components/Icon';
 import { Intro } from '@/components/Intro';
 import { PlayerHost } from '@/components/Player';
+import { UpdateSheet } from '@/components/UpdateSheet';
 import { queryClient } from '@/lib/queries';
 import { color } from '@/theme/tokens';
 
@@ -50,7 +51,9 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="show/[id]" />
           <Stack.Screen name="genre/[id]" />
+          <Stack.Screen name="account" options={{ animation: 'slide_from_bottom' }} />
         </Stack>
+        <UpdateSheet />
         <PlayerHost />
         <Intro ready={restored && fonts} />
       </PersistQueryClientProvider>

@@ -254,7 +254,7 @@ function usePreloadUpNext(show: Show, upNext: EpisodeLite | undefined) {
       const id = setTimeout(() => {
         const { show: s, upNext: ep } = latest.current;
         if (ep) preloadEpisode(s, ep);
-      }, 900);
+      }, 2500);
       return () => {
         clearTimeout(id);
         if (!usePlayer.getState().visible) usePlayer.getState().dropPreload(showId);

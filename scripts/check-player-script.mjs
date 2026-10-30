@@ -1,13 +1,17 @@
 // The player script is JavaScript generated inside a TS template literal, so tsc can't see
 // syntax errors in it (a single lost backslash in a regex breaks the whole script silently).
 // Parse it the way react-native-webview will run it.
-const { playerScript, flushScript } = await import('../src/lib/inject.ts');
+const { playerScript, accountScript, flushScript, pauseScript, revealScript } = await import('../src/lib/inject.ts');
 
 const script = playerScript({ id: 'episode', t: 42, preload: true });
 for (const [name, source] of [
   ['playerScript', script],
   ['playerScript (as wrapped by the WebView)', `(function() {\n${script};\n})();`],
+  ['accountScript', accountScript],
+  ['accountScript (as wrapped by the WebView)', `(function() {\n${accountScript};\n})();`],
   ['flushScript', flushScript],
+  ['pauseScript', pauseScript],
+  ['revealScript', revealScript(42)],
 ]) {
   try {
     new Function(source);

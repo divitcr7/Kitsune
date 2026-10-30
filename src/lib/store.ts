@@ -16,6 +16,9 @@ type State = {
   recordPlay: (show: ShowLite, episode: EpisodeLite) => void;
   recordProgress: (showId: string, episode: { id: string; slug: string; number?: number }, t: number, d: number) => void;
   removeHistory: (showId: string) => void;
+  /** Last known anime.nexus sign-in state (null: never checked). */
+  signedIn: boolean | null;
+  setSignedIn: (v: boolean) => void;
 };
 
 const MAX_PROGRESS = 800;
@@ -74,12 +77,15 @@ export const useStore = create<State>()(
         delete history[showId];
         set({ history });
       },
+
+      signedIn: null,
+      setSignedIn: (signedIn) => set({ signedIn }),
     }),
     {
       name: 'kitsune-store',
       version: 1,
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: (s) => ({ myList: s.myList, history: s.history, progress: s.progress }),
+      partialize: (s) => ({ myList: s.myList, history: s.history, progress: s.progress, signedIn: s.signedIn }),
     },
   ),
 );

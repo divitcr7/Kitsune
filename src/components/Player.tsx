@@ -4,6 +4,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { LinearGradient } from 'expo-linear-gradient';
 import { NavigationBar, setVisibilityAsync } from 'expo-navigation-bar';
 import * as ScreenOrientation from 'expo-screen-orientation';
+import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, StyleSheet, View } from 'react-native';
@@ -20,15 +21,16 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import type { ShouldStartLoadRequest, WebViewHttpErrorEvent } from 'react-native-webview/lib/WebViewTypes';
 import { queryClient } from '@/lib/queries';
-import { flushScript, playerScript, revealScript } from '@/lib/inject';
+import { flushScript, pauseScript, playerScript, revealScript } from '@/lib/inject';
 import { type Session, usePlayer } from '@/lib/player';
-import { useStore } from '@/lib/store';
+import { resumePoint, useStore } from '@/lib/store';
 import { color, radius, spring } from '@/theme/tokens';
 import { Button, IconButton } from './Button';
+import { Icon } from './Icon';
 import { Spinner } from './Spinner';
 import { T } from './T';
 
-const ALLOWED = /(^|\.)(anime\.nexus|anime\.delivery|challenges\.cloudflare\.com|accounts\.google\.com|discord\.com)$/i;
+const ALLOWED = /(^|\.)(anime\.nexus|anime\.delivery|challenges\.cloudflare\.com)$/i;
 const READY_TIMEOUT = 15_000;
 
 /** Renders the app's single player above everything; hidden while it preloads. */
@@ -48,11 +50,18 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
   const [attempt, setAttempt] = useState(0);
   const [episode, setEpisode] = useState({ number: String(session.number), title: session.title });
   const [toast, setToast] = useState<{ text: string; key: number } | null>(null);
+  const [problem, setProblem] = useState<{ kind: 'auth' | 'stream'; text: string } | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [closing, setClosing] = useState(false);
+  // What the page should load; a retry swaps in the episode now playing and where it got to.
+  const [target, setTarget] = useState({ id: session.episodeId, slug: session.slug, t: session.startAt });
+  // The episode on screen right now (the site can move on to the next one by itself).
+  const now = useRef({ id: session.episodeId, slug: session.slug, number: session.number });
 
-  const uri = `https://anime.nexus/watch/${session.episodeId}/${session.slug}`;
+  const uri = `https://anime.nexus/watch/${target.id}/${target.slug}`;
   const pageUrl = useRef(uri);
-  // Built once per episode: whether it starts as a preload is decided at mount.
-  const script = useMemo(() => playerScript({ id: session.episodeId, t: session.startAt, preload: !visible }), [session.episodeId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Built per load: whether it starts as a preload is decided when it's created.
+  const script = useMemo(() => playerScript({ id: target.id, t: target.t, preload: !visible }), [target]); // eslint-disable-line react-hooks/exhaustive-deps
   // Android runs the "before content" script from onPageStarted, which can land before the new
   // document exists and be lost. The script is idempotent, so re-inject at every load milestone.
   const inject = () => web.current?.injectJavaScript(script);
@@ -87,12 +96,44 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
   }, [ready, attempt, visible]);
 
   function exit() {
-    web.current?.injectJavaScript(flushScript);
-    show.set(withTiming(0, { duration: 200 }, (done) => done && scheduleOnRN(close)));
+    // Black out the page first: pausing makes the site flash its own overlays. Rotate back to
+    // portrait behind the black, then fade out.
+    setClosing(true);
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    requestAnimationFrame(() => web.current?.injectJavaScript(flushScript));
+    show.set(withDelay(240, withTiming(0, { duration: 200 }, (done) => done && scheduleOnRN(close))));
+  }
+
+  /** Reload the episode on screen, picking up where it got to. */
+  function retry() {
+    const cur = now.current;
+    const t = Math.floor(resumePoint(useStore.getState().progress[cur.id]));
+    pageUrl.current = `https://anime.nexus/watch/${cur.id}/${cur.slug}`;
+    setProblem(null);
+    setFailed(false);
+    setVerifying(false);
+    setReady(false);
+    setTarget({ id: cur.id, slug: cur.slug, t });
+    setAttempt((n) => n + 1);
+  }
+
+  /** Close the player and open the anime.nexus account screen; playback resumes after sign-in. */
+  function signIn() {
+    const cur = now.current;
+    usePlayer.getState().setResume({
+      ...session,
+      episodeId: cur.id,
+      slug: cur.slug,
+      number: cur.number,
+      title: cur.id === session.episodeId ? session.title : '',
+      startAt: Math.floor(resumePoint(useStore.getState().progress[cur.id])),
+    });
+    exit();
+    router.push('/account');
   }
 
   function onMessage(e: WebViewMessageEvent) {
-    let msg: { type: string; id?: string; slug?: string; number?: number; t?: number; d?: number; text?: string };
+    let msg: { type: string; id?: string; slug?: string; number?: number; t?: number; d?: number; text?: string; kind?: string; on?: boolean };
     try {
       msg = JSON.parse(e.nativeEvent.data);
     } catch {
@@ -110,7 +151,17 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
     }
     if (msg.type === 'progress' && msg.id && msg.slug && msg.d && Number.isFinite(msg.d)) {
       recordProgress(session.showId, { id: msg.id, slug: msg.slug, number: msg.number }, msg.t ?? 0, msg.d);
+      now.current = { id: msg.id, slug: msg.slug, number: msg.number ?? now.current.number };
       if (msg.id !== session.episodeId && msg.number) setEpisode({ number: String(msg.number), title: '' });
+    }
+    if (msg.type === 'verify') setVerifying(!!msg.on);
+    if (msg.type === 'signin') signIn();
+    if (msg.type === 'problem' && msg.text) {
+      // The site is refusing streams for now; stop preloading so we don't make it worse.
+      usePlayer.getState().backOff();
+      if (msg.kind === 'auth') web.current?.injectJavaScript(pauseScript);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      setProblem({ kind: msg.kind === 'auth' ? 'auth' : 'stream', text: msg.text });
     }
   }
 
@@ -139,7 +190,7 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
         ref={web}
         source={{ uri }}
         style={styles.web}
-        containerStyle={styles.web}
+        containerStyle={[styles.web, closing && styles.hidden]}
         injectedJavaScriptBeforeContentLoaded={script}
         injectedJavaScriptBeforeContentLoadedForMainFrameOnly
         onMessage={onMessage}
@@ -180,22 +231,13 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
           setAttempt((n) => n + 1);
         }}
       />
-      {visible && (!ready || failed) ? (
-        <Loader
-          name={session.showName}
-          number={episode.number}
-          title={episode.title}
-          thumb={session.thumb}
-          failed={failed}
-          onRetry={() => {
-            setFailed(false);
-            setReady(false);
-            setAttempt((n) => n + 1);
-          }}
-        />
+      {visible && (!ready || failed) && !verifying && !problem ? (
+        <Loader name={session.showName} number={episode.number} title={episode.title} thumb={session.thumb} failed={failed} onRetry={retry} />
       ) : null}
-      {toast ? <Toast key={toast.key} text={toast.text} onDone={() => setToast(null)} /> : null}
-      {visible && (!ready || failed) ? (
+      {visible && problem ? <Problem kind={problem.kind} text={problem.text} onRetry={retry} onSignIn={signIn} /> : null}
+      {toast && !problem ? <Toast key={toast.key} text={toast.text} onDone={() => setToast(null)} /> : null}
+      {closing ? <View style={[StyleSheet.absoluteFill, styles.blackout]} /> : null}
+      {visible && !closing && (!ready || failed || verifying || problem) ? (
         <View style={styles.back}>
           <IconButton icon="arrow-left" label="Close player" variant="scrim" onPress={exit} />
         </View>
@@ -219,6 +261,33 @@ function Toast({ text, onDone }: { text: string; onDone: () => void }) {
         </T>
       </View>
     </Animated.View>
+  );
+}
+
+/** The site refused or paused the stream: say why in plain words and offer the way forward. */
+function Problem({ kind, text, onRetry, onSignIn }: { kind: 'auth' | 'stream'; text: string; onRetry: () => void; onSignIn: () => void }) {
+  const auth = kind === 'auth';
+  return (
+    <View style={[StyleSheet.absoluteFill, styles.loader]}>
+      <View style={styles.problem}>
+        <Icon name={auth ? 'account-lock-outline' : 'alert-circle-outline'} size={36} tint={color.accent} />
+        <T variant="title" style={styles.cardTitle}>
+          {auth ? 'Sign in to keep watching' : 'This episode won’t start right now'}
+        </T>
+        <T dim style={styles.problemBody}>
+          {auth
+            ? 'anime.nexus paused this stream and wants you signed in. Sign in once with your anime.nexus account and Kitsune picks up right where you left off.'
+            : 'anime.nexus couldn’t start the stream. That’s usually a short limit on their side, so give it a minute and try again. Signing in to anime.nexus helps too.'}
+        </T>
+        <View style={styles.problemActions}>
+          <Button label={auth ? 'Sign in' : 'Try again'} icon={auth ? 'login' : 'refresh'} size="sm" onPress={auth ? onSignIn : onRetry} />
+          <Button label={auth ? 'Try again' : 'Sign in'} variant="secondary" size="sm" onPress={auth ? onRetry : onSignIn} />
+        </View>
+        <T variant="caption" faint numberOfLines={2} style={styles.problemNote}>
+          anime.nexus says: “{text}”
+        </T>
+      </View>
+    </View>
   );
 }
 
@@ -253,6 +322,12 @@ const styles = StyleSheet.create({
   card: { width: 360, alignItems: 'center' },
   cardTitle: { marginTop: 6, textAlign: 'center' },
   back: { position: 'absolute', top: 16, left: 16 },
+  blackout: { backgroundColor: '#000' },
+  hidden: { opacity: 0 },
+  problem: { width: 460, maxWidth: '90%', alignItems: 'center' },
+  problemBody: { marginTop: 8, textAlign: 'center', lineHeight: 21 },
+  problemActions: { flexDirection: 'row', gap: 10, marginTop: 18 },
+  problemNote: { marginTop: 14, textAlign: 'center' },
   toastWrap: { position: 'absolute', bottom: 24, alignSelf: 'center' },
   toast: { paddingHorizontal: 18, paddingVertical: 11, borderRadius: radius.pill, backgroundColor: 'rgba(28,28,32,0.95)', borderWidth: StyleSheet.hairlineWidth, borderColor: color.line },
 });

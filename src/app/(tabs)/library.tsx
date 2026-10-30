@@ -1,5 +1,5 @@
-import Constants from 'expo-constants';
 import { Image } from 'expo-image';
+import { router } from 'expo-router';
 import { useTabTrigger } from 'expo-router/ui';
 import { useMemo } from 'react';
 import { FlatList, Linking, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
@@ -20,6 +20,7 @@ import { minutes, timeAgo } from '@/lib/format';
 import { art } from '@/lib/img';
 import { openShow, playEpisode } from '@/lib/nav';
 import { fraction, type HistoryEntry, useStore } from '@/lib/store';
+import { appVersion, useUpdates } from '@/lib/updates';
 import { color, radius, TAB_BAR_HEIGHT } from '@/theme/tokens';
 
 const GITHUB = 'https://github.com/divitcr7';
@@ -117,6 +118,9 @@ export default function Library() {
           <Empty icon="history" text="Everything you watch shows up here, so you can jump right back in." />
         )}
 
+        <Header title="Account" />
+        <AccountRow />
+
         <About />
       </Animated.ScrollView>
       <TopBar scrollY={scrollY} from={10} to={50} title="My Stuff" />
@@ -207,8 +211,43 @@ function Empty({ icon, text }: { icon: 'history' | 'plus'; text: string }) {
   );
 }
 
+function AccountRow() {
+  const signedIn = useStore((s) => s.signedIn);
+  return (
+    <Pressable onPress={() => router.push('/account')} style={({ pressed }) => [styles.pad, styles.account, pressed && { opacity: 0.6 }]}>
+      <Icon name="account-circle-outline" size={30} tint={color.text} />
+      <View style={{ flex: 1 }}>
+        <T variant="heading">anime.nexus account</T>
+        <T variant="caption" faint style={{ marginTop: 2 }}>
+          {signedIn ? 'Signed in  ·  manage or sign out' : 'Sign in so streams don’t get interrupted'}
+        </T>
+      </View>
+      <Icon name="chevron-right" tint={color.textFaint} />
+    </Pressable>
+  );
+}
+
+function UpdateRow() {
+  const { release, status, check, showPrompt } = useUpdates();
+  if (release) {
+    return <Button label={`Update to ${release.version}`} icon="download" variant="accent" size="sm" onPress={showPrompt} style={{ alignSelf: 'flex-start', marginTop: 14 }} />;
+  }
+  const label = status === 'checking' ? 'Checking…' : status === 'current' ? 'You’re on the latest version' : status === 'error' ? 'Couldn’t check. Try again' : 'Check for updates';
+  return (
+    <Button
+      label={label}
+      icon={status === 'current' ? 'check' : 'refresh'}
+      variant="text"
+      size="sm"
+      disabled={status === 'checking'}
+      onPress={() => check(true)}
+      style={{ alignSelf: 'flex-start', marginTop: 10 }}
+    />
+  );
+}
+
 function About() {
-  const version = Constants.expoConfig?.version ?? '1.0.0';
+  const version = appVersion;
   return (
     <View style={[styles.pad, { marginTop: 44 }]}>
       <Divider />
@@ -223,6 +262,7 @@ function About() {
           </T>
         </View>
       </View>
+      <UpdateRow />
       <T dim style={{ marginTop: 14 }}>
         Made by Divit. Ideas, bugs, or just want to say hi? Reach out anytime.
       </T>
@@ -252,6 +292,7 @@ const styles = StyleSheet.create({
   remove: { width: 96, alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: color.dangerSoft },
   grid: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 10, rowGap: 10 },
   empty: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  account: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   aboutHead: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 24 },
   links: { flexDirection: 'row', gap: 10, marginTop: 16 },
 });

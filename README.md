@@ -71,6 +71,8 @@ No accounts. No analytics. No trackers. Your list and history stay on your phone
 | 🔎 **Search & categories** | Live search across English and Japanese titles, browse by genre, popular this week |
 | 📅 **Schedule** | A weekly TV guide with air times, starting on today |
 | 🔖 **My Stuff** | My List, watch history (swipe to remove), and how many hours you've put in |
+| 🔄 **In-app updates** | New GitHub releases show up in the app: one tap downloads, checks and installs them, and your list and history stay |
+| 🔐 **anime.nexus sign-in** | Sign in once (My Stuff → anime.nexus account) and the player streams as you, with no guest limits |
 | 🪶 **Light** | ~35 MB arm64 APK, R8-shrunk, cached catalog for instant cold starts |
 
 ## Install
@@ -84,6 +86,16 @@ shasum -a 256 Kitsune-v1.0.0.apk
 ```
 
 Every release is signed with the same key, so updates install over the top and keep your list and history.
+
+**Updates.** From v1.0.1 on, Kitsune checks this repo's latest release every few hours. When there's a newer one, it shows a sheet with the release notes and an **Update now** button: it downloads the APK, checks it against the release's SHA-256, and opens Android's installer. The first time, Android asks you to allow installs from Kitsune. (Android doesn't let sideloaded apps update silently, so it's one tap rather than none.) You can also check by hand in **My Stuff → Check for updates**.
+
+## Troubleshooting
+
+**"Sign in to continue this streaming session" or "Too many new guest sessions".** That's anime.nexus limiting guest streams. Kitsune shows a screen with **Sign in** and **Try again**. Signing in to your anime.nexus account (My Stuff → anime.nexus account) lifts the guest limits, and playback picks up where it stopped. Use your email and password: Google blocks its sign-in inside apps, so if you signed up with Google, add a password on anime.nexus in a browser first.
+
+**"This episode won't start right now".** anime.nexus refused the stream for a moment, usually a short rate limit. Wait a minute and tap **Try again**. Kitsune also pauses its background preloading for a while so it doesn't make things worse.
+
+**A "Verify you are human" box over the video.** That's Cloudflare, on anime.nexus's behalf. Tap it and playback continues.
 
 ## How it works
 
@@ -121,6 +133,12 @@ For live development, `npx expo run:android` with a device or emulator attached.
 
 The `android/` folder is generated from `app.json` by `expo prebuild` and is not committed.
 
+**Releasing an update** (so installed apps pick it up):
+
+1. Bump `expo.version` **and** `expo.android.versionCode` in `app.json` (versionCode must go up every release, or Android refuses the update). Keep `package.json`'s version in step.
+2. `npm run build:apk`. It writes `dist/Kitsune-vX.Y.Z.apk` and `dist/Kitsune-vX.Y.Z.apk.sha256`, signed with your release key.
+3. Publish a GitHub release tagged `vX.Y.Z` and attach both files. The release notes are what the in-app update sheet shows.
+
 **Signing.** Without a keystore the APK is signed with the debug key. To sign with your own release key, create `~/.kitsune/keystore.properties` (or point `KITSUNE_KEYSTORE_PROPERTIES` at one) with `storeFile`, `storePassword`, `keyAlias` and `keyPassword`. Keys stay outside the repo; `.gitignore` also blocks `*.jks`, `*.p12`, `*.key` and `.env*.local`.
 
 ## Project layout
@@ -131,7 +149,9 @@ The `android/` folder is generated from `app.json` by `expo prebuild` and is not
 | `src/components/` | Hero, rails, poster and episode cards, tab bar, player host |
 | `src/lib/api.ts` | anime.nexus API client and types |
 | `src/lib/inject.ts` | The script injected into the player page (blocking, player-only view, resume, progress) |
-| `src/lib/player.ts` | The single app-wide player: open, preload, reveal, close |
+| `src/lib/player.ts` | The single app-wide player: open, preload (rate-limited), reveal, close, resume after sign-in |
+| `src/lib/updates.ts` | In-app updates from GitHub releases: check, download, verify, install |
+| `src/app/account.tsx` | anime.nexus account screen (sign in, settings) behind the same ad guard as the player |
 | `src/lib/store.ts` | My List, history and progress (persisted on device) |
 | `src/lib/queries.ts` | TanStack Query definitions, with an on-disk cache for the home rails |
 | `src/theme/tokens.ts` | Colours, type, radii, motion |
