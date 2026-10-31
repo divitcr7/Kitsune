@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { type ComponentProps, useEffect, useState } from 'react';
 import { AppState, BackHandler, Pressable, StyleSheet, TVFocusGuideView, View } from 'react-native';
 import Animated, { Easing, FadeIn, FadeOut, SlideInDown, SlideOutDown, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -85,11 +85,10 @@ export function UpdateSheet() {
                   {error}
                 </T>
               ) : null}
-              <Button
+              <FocusedButton
                 label={error ? 'Try again' : isDownloaded(release) ? 'Install update' : 'Update now'}
                 icon="download"
                 size="lg"
-                hasTVPreferredFocus
                 onPress={update}
                 style={{ marginTop: 18 }}
               />
@@ -104,6 +103,19 @@ export function UpdateSheet() {
       </Animated.View>
     </View>
   );
+}
+
+/**
+ * The dialog's main button, which takes the TV remote's focus. Asking for focus as the dialog zooms
+ * in is ignored (it isn't on screen yet), so it asks a moment later.
+ */
+function FocusedButton(props: ComponentProps<typeof Button>) {
+  const [grab, setGrab] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => setGrab(true), 350);
+    return () => clearTimeout(id);
+  }, []);
+  return <Button {...props} hasTVPreferredFocus={grab} />;
 }
 
 function Trap({ children }: { children: React.ReactNode }) {
