@@ -11,7 +11,7 @@ You need the TV and a computer (Windows, macOS or Linux) on the same network. On
 1. **Developer Mode on the TV.** Open **Apps**, then press **1 2 3 4 5** on the remote (on some remotes, the on-screen number pad). Switch **Developer mode** on, enter your computer's IP address as **Host PC IP**, and restart the TV (hold the power button until it turns off and on again).
 2. **Install TizenBrew** with [TizenBrew Installer](https://github.com/reisxd/TizenBrewInstaller/releases/latest) on your computer (on macOS or Linux you may need to `chmod +x` the download and run it from a terminal). Press **Install TizenBrew**. On 2023 and newer TVs (Tizen 7+) it asks you to sign in with a Samsung account, which it uses to make a certificate for your TV. Full instructions: [TizenBrew's guide](https://github.com/reisxd/TizenBrew/blob/main/docs/README.md).
 3. **Point Developer Mode at the TV itself.** TizenBrew injects modules through the TV's own debugger and only does so when **Host PC IP** is `127.0.0.1`. Go back to **Apps → 1 2 3 4 5**, set it to `127.0.0.1` if it isn't already, and restart the TV.
-4. **Add Kitsune.** Open TizenBrew on the TV, go to **Module Manager → Add**, choose **NPM**, and enter `@divitcr7/kitsune-tizen`. Kitsune appears in TizenBrew's list; open it from there. (TizenBrew's settings can also launch it automatically.)
+4. **Add Kitsune.** Open TizenBrew on the TV, go to **Module Manager → Add**, choose **NPM**, and enter `@divit7/kitsune-tizen`. Kitsune appears in TizenBrew's list; open it from there. (TizenBrew's settings can also launch it automatically.)
 
 Updates arrive by themselves: TizenBrew loads the newest published version of the module each time it starts.
 
@@ -83,10 +83,12 @@ Query parameters: `mode=ui|player|login`, `seed=1` (fills Continue Watching, My 
 
 ## Publishing
 
-The module is published to npm as `@divitcr7/kitsune-tizen` (`files` ships only `dist/kitsune.js` and this README):
+The module is published to npm as `@divit7/kitsune-tizen` (`files` ships only `dist/kitsune.js` and this README):
 
 ```sh
 npm run build:tizen && npm publish --access public ./tv/tizen
 ```
+
+To keep the npm login inside this project instead of `~/.npmrc`, put it in the gitignored `.npmrc.local` and point npm at it for each command: `NPM_CONFIG_USERCONFIG=$PWD/.npmrc.local npm login`, then the same prefix on `npm publish`.
 
 Bump `version` in `tv/tizen/package.json` for each release. TizenBrew reads the package through jsDelivr's npm mirror, which picks up a new version within minutes to hours.

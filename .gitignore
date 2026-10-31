@@ -33,6 +33,9 @@ yarn-error.*
 # local env files
 .env*.local
 
+# npm login token for publishing the Samsung TV module (kept out of ~/.npmrc)
+.npmrc.local
+
 # typescript
 *.tsbuildinfo
 
