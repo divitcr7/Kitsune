@@ -13,7 +13,7 @@ import ts from 'typescript';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
 const out = resolve(here, 'dist/kitsune.js');
-const { version } = JSON.parse(readFileSync(resolve(here, 'package.json'), 'utf8'));
+const { version, kitsuneNotes = '' } = JSON.parse(readFileSync(resolve(here, 'package.json'), 'utf8'));
 
 const bundled = await build({
   entryPoints: [resolve(here, 'src/main.ts')],
@@ -25,7 +25,7 @@ const bundled = await build({
   jsxImportSource: 'preact',
   alias: { '@': resolve(root, 'src') },
   loader: { '.css': 'text' },
-  define: { 'process.env.NODE_ENV': '"production"', KITSUNE_VERSION: JSON.stringify(version) },
+  define: { 'process.env.NODE_ENV': '"production"', KITSUNE_VERSION: JSON.stringify(version), KITSUNE_NOTES: JSON.stringify(kitsuneNotes) },
   legalComments: 'none',
   logLevel: 'warning',
 });

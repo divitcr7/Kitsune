@@ -214,3 +214,5 @@ html.k-ui body{color:#fff;font-family:"SamsungOne","Samsung Sans","SamsungOneUI"
 .l-note{margin-top:22px;font-size:20px;line-height:28px;color:#A7A7B1}
 .l-error{margin-top:18px;font-size:22px;color:#FF5A5F}
 [data-kitsune-site].f{outline:4px solid #fff!important;outline-offset:3px!important;border-radius:6px}
+.k-updated{position:absolute;left:50%;bottom:56px;width:900px;margin-left:-450px;display:flex;align-items:center;padding:18px 26px;border-radius:22px;background:rgba(22,22,26,.96);box-shadow:0 0 0 2px rgba(255,255,255,.08)}
+.k-updated>div{margin-left:18px}

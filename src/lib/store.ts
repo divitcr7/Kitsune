@@ -19,6 +19,9 @@ type State = {
   /** Last known anime.nexus sign-in state (null: never checked). */
   signedIn: boolean | null;
   setSignedIn: (v: boolean) => void;
+  /** Until when anime.nexus is refusing to open its player inside the app (0: it isn't). */
+  blockedUntil: number;
+  setBlockedUntil: (t: number) => void;
 };
 
 const MAX_PROGRESS = 800;
@@ -80,15 +83,28 @@ export const useStore = create<State>()(
 
       signedIn: null,
       setSignedIn: (signedIn) => set({ signedIn }),
+
+      blockedUntil: 0,
+      setBlockedUntil: (blockedUntil) => set({ blockedUntil }),
     }),
     {
       name: 'kitsune-store',
       version: 1,
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: (s) => ({ myList: s.myList, history: s.history, progress: s.progress, signedIn: s.signedIn }),
+      partialize: (s) => ({ myList: s.myList, history: s.history, progress: s.progress, signedIn: s.signedIn, blockedUntil: s.blockedUntil }),
     },
   ),
 );
+
+/**
+ * anime.nexus refused the in-app player recently (it turns away pages opened inside apps), so
+ * episodes go to the phone's browser for now. The app tries its own player again once this lapses.
+ */
+export const BLOCKED_FOR = 6 * 60 * 60_000;
+
+export function inAppBlocked() {
+  return useStore.getState().blockedUntil > Date.now();
+}
 
 export function resumePoint(p?: Progress) {
   if (!p || p.t < 10 || p.t > p.d - 60) return 0;

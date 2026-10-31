@@ -22,9 +22,10 @@ import type { ShouldStartLoadRequest, WebViewHttpErrorEvent } from 'react-native
 import { queryClient } from '@/lib/queries';
 import { haptics, NotificationFeedbackType } from '@/lib/haptics';
 import { flushScript, pauseScript, playerScript, revealScript, tvCommandScript, type TvCommand } from '@/lib/inject';
-import { findEpisode } from '@/lib/nav';
+import { canOpenBrowser, openInBrowser } from '@/lib/browser';
+import { findEpisode, watchUrl } from '@/lib/nav';
 import { type Session, usePlayer } from '@/lib/player';
-import { resumePoint, useStore } from '@/lib/store';
+import { BLOCKED_FOR, resumePoint, useStore } from '@/lib/store';
 import { isTV, tv } from '@/lib/tv';
 import { color, radius, spring } from '@/theme/tokens';
 import { Button, IconButton } from './Button';
@@ -54,7 +55,7 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
   const [attempt, setAttempt] = useState(0);
   const [episode, setEpisode] = useState({ number: String(session.number), title: session.title });
   const [toast, setToast] = useState<{ text: string; key: number } | null>(null);
-  const [problem, setProblem] = useState<{ kind: 'auth' | 'stream'; text: string } | null>(null);
+  const [problem, setProblem] = useState<{ kind: 'auth' | 'stream' | 'blocked'; text: string; blocked?: string[] } | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [closing, setClosing] = useState(false);
   // What the page should load; a retry swaps in the episode now playing and where it got to.
@@ -73,6 +74,8 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
   const show = useSharedValue(visible ? 1 : 0);
   // TV: the OSD reads the page's once-a-second 'tick' straight from here.
   const feedRef = useRef<((t: Tick) => void) | null>(null);
+  // Whether the loader's backdrop image has finished decoding (see refused()).
+  const thumbLoaded = useRef(!session.thumb);
 
   // Becoming visible: rotate, go immersive, and start playback if it was preloaded.
   useEffect(() => {
@@ -126,6 +129,26 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
     setAttempt((n) => n + 1);
   }
 
+  /**
+   * anime.nexus turned the page away (it refuses pages opened inside apps). Remember that, and hand
+   * the episode to the phone's browser, where it plays; a TV has no browser, so say what happened.
+   */
+  async function refused() {
+    usePlayer.getState().backOff();
+    useStore.getState().setBlockedUntil(Date.now() + BLOCKED_FOR);
+    if (!visible) return close();
+    const url = watchUrl(now.current);
+    if (await canOpenBrowser()) {
+      // Don't send the app to the background while the loader's image is still decoding: the
+      // image decoder (expo-image's AVIF plugin) can crash if it's torn down mid-frame.
+      for (let waited = 0; !thumbLoaded.current && waited < 2500; waited += 100) await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 400));
+      // Close the player only once the browser is really up (it opens over the app).
+      if (await openInBrowser(url)) return exit();
+    }
+    setProblem({ kind: 'blocked', text: '' });
+  }
+
   /** Next / previous episode from the remote: load it in place, picking up where it was left. */
   async function jump(step: 1 | -1) {
     const cur = now.current;
@@ -166,13 +189,17 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
   }
 
   function onMessage(e: WebViewMessageEvent) {
-    let msg: { type: string; id?: string; slug?: string; number?: number; t?: number; d?: number; text?: string; kind?: string; on?: boolean } & Partial<Tick>;
+    let msg: { type: string; id?: string; slug?: string; number?: number; t?: number; d?: number; text?: string; kind?: string; on?: boolean; blocked?: string[] } & Partial<Tick>;
     try {
       msg = JSON.parse(e.nativeEvent.data);
     } catch {
       return;
     }
-    if (msg.type === 'ready') setReady(true);
+    if (msg.type === 'ready') {
+      setReady(true);
+      // The in-app player works again: stop sending episodes to the browser.
+      if (useStore.getState().blockedUntil) useStore.getState().setBlockedUntil(0);
+    }
     if (msg.type === 'close') exit();
     if (msg.type === 'loading') {
       setReady(false);
@@ -202,7 +229,7 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
       usePlayer.getState().backOff();
       if (msg.kind === 'auth') web.current?.injectJavaScript(pauseScript);
       haptics.notify(NotificationFeedbackType.Warning);
-      setProblem({ kind: msg.kind === 'auth' ? 'auth' : 'stream', text: msg.text });
+      setProblem({ kind: msg.kind === 'auth' ? 'auth' : 'stream', text: msg.text, blocked: msg.blocked });
     }
   }
 
@@ -270,7 +297,9 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
           webviewDebuggingEnabled={__DEV__}
           onError={() => setFailed(true)}
           onHttpError={(e: WebViewHttpErrorEvent) => {
-            if (e.nativeEvent.statusCode >= 500) setFailed(true);
+            const { statusCode, url } = e.nativeEvent;
+            if (statusCode >= 500) setFailed(true);
+            else if (statusCode >= 400 && url.includes('/watch/')) refused();
           }}
           onRenderProcessGone={() => {
             setReady(false);
@@ -279,7 +308,15 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
         />
       </FocusBlock>
       {visible && (!ready || failed) && !verifying && !problem ? (
-        <Loader name={session.showName} number={episode.number} title={episode.title} thumb={session.thumb} failed={failed} onRetry={retry} />
+        <Loader
+          name={session.showName}
+          number={episode.number}
+          title={episode.title}
+          thumb={session.thumb}
+          failed={failed}
+          onRetry={retry}
+          onThumbLoad={() => (thumbLoaded.current = true)}
+        />
       ) : null}
       {isTV && visible && ready && !failed && !problem && !verifying && !closing ? (
         <PlayerOsd
@@ -296,7 +333,7 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
           <T variant="label">Use the remote to tick the box  ·  Back to leave</T>
         </View>
       ) : null}
-      {visible && problem ? <Problem kind={problem.kind} text={problem.text} onRetry={retry} onSignIn={signIn} /> : null}
+      {visible && problem ? <Problem kind={problem.kind} text={problem.text} blocked={problem.blocked} onRetry={retry} onSignIn={signIn} /> : null}
       {toast && !problem ? <Toast key={toast.key} text={toast.text} onDone={() => setToast(null)} /> : null}
       {closing ? <View style={[StyleSheet.absoluteFill, styles.blackout]} /> : null}
       {/* A TV has a Back key; a focusable button here would only steal the remote. */}
@@ -328,8 +365,26 @@ function Toast({ text, onDone }: { text: string; onDone: () => void }) {
 }
 
 /** The site refused or paused the stream: say why in plain words and offer the way forward. */
-function Problem({ kind, text, onRetry, onSignIn }: { kind: 'auth' | 'stream'; text: string; onRetry: () => void; onSignIn: () => void }) {
+function Problem({ kind, text, blocked, onRetry, onSignIn }: { kind: 'auth' | 'stream' | 'blocked'; text: string; blocked?: string[]; onRetry: () => void; onSignIn: () => void }) {
   const auth = kind === 'auth';
+  if (kind === 'blocked') {
+    return (
+      <View style={[StyleSheet.absoluteFill, styles.loader]}>
+        <View style={styles.problem}>
+          <Icon name="television-off" size={36} tint={color.accent} />
+          <T variant="title" style={styles.cardTitle}>
+            anime.nexus won’t play inside apps right now
+          </T>
+          <T dim style={styles.problemBody}>
+            anime.nexus is turning away its player when it’s opened inside an app, so Kitsune can’t play it here. On a phone, Kitsune hands episodes to the browser instead; this TV has no browser to hand them to. Kitsune tries its own player again by itself every few hours.
+          </T>
+          <View style={styles.problemActions}>
+            <Button label="Try again" icon="refresh" size="sm" hasTVPreferredFocus onPress={onRetry} />
+          </View>
+        </View>
+      </View>
+    );
+  }
   return (
     <View style={[StyleSheet.absoluteFill, styles.loader]}>
       <View style={styles.problem}>
@@ -349,15 +404,22 @@ function Problem({ kind, text, onRetry, onSignIn }: { kind: 'auth' | 'stream'; t
         <T variant="caption" faint numberOfLines={2} style={styles.problemNote}>
           anime.nexus says: “{text}”
         </T>
+        {blocked?.length ? (
+          <T variant="caption" faint numberOfLines={2} style={{ marginTop: 4, textAlign: 'center' }}>
+            Kitsune held back: {blocked.join(', ')}
+          </T>
+        ) : null}
       </View>
     </View>
   );
 }
 
-function Loader({ name, number, title, thumb, failed, onRetry }: { name: string; number: string; title: string; thumb?: string; failed: boolean; onRetry: () => void }) {
+function Loader({ name, number, title, thumb, failed, onRetry, onThumbLoad }: { name: string; number: string; title: string; thumb?: string; failed: boolean; onRetry: () => void; onThumbLoad?: () => void }) {
   return (
     <View style={[StyleSheet.absoluteFill, styles.loader]}>
-      {thumb ? <Image source={{ uri: thumb }} blurRadius={18} contentFit="cover" style={[StyleSheet.absoluteFill, { opacity: 0.45 }]} /> : null}
+      {thumb ? (
+        <Image source={{ uri: thumb }} blurRadius={18} contentFit="cover" onLoad={onThumbLoad} onError={onThumbLoad} style={[StyleSheet.absoluteFill, { opacity: 0.45 }]} />
+      ) : null}
       <LinearGradient colors={['rgba(0,0,0,0.45)', 'rgba(0,0,0,0.94)']} style={StyleSheet.absoluteFill} />
       <View style={styles.card}>
         {failed ? null : <Spinner size={44} />}

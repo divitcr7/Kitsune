@@ -9,8 +9,11 @@ const GUARD = `
   var BLOCK = /(popads|popcash|propeller|onclick|clickadu|hilltopads|adsterra|profitableratecpm|highperformanceformat|revenuecpmgate|smartpopads|pemsrv|doubleclick|googlesyndication|exoclick|exosrv|juicyads|monetag|magsrv|realsrv|tsyndicate|trafficjunky|mgid|taboola|outbrain|galaksion|admaven|richads|rollerads|evadav|cpmgate|ratecpm|popunder|googletagmanager|google-analytics|cloudflareinsights)/i;
 
   function host(u) { try { return new URL(u, location.href).hostname; } catch (e) { return ''; } }
-  function codeOk(u) { if (!u) return true; var h = host(u); return !h || CODE_OK.test(h); }
-  function bad(u) { var h = host(u); return !!h && BLOCK.test(h); }
+  // What the guard turned away, so an error screen can say (helps when the site starts needing a new host).
+  var held = {};
+  window.__kitsuneHeld = function () { return Object.keys(held).slice(0, 6); };
+  function codeOk(u) { if (!u) return true; var h = host(u); if (!h || CODE_OK.test(h)) return true; held[h] = 1; return false; }
+  function bad(u) { var h = host(u); if (!h || !BLOCK.test(h)) return false; held[h] = 1; return true; }
   function post(m) { try { window.ReactNativeWebView.postMessage(JSON.stringify(m)); } catch (e) {} }
 
   function guard(proto, attr, ok) {
@@ -294,7 +297,7 @@ ${GUARD}
   }
 
   var AUTH_TEXT = /sign in to continue[^.\\n]*|too many new guest sessions[^.\\n]*/i;
-  var FAIL_TEXT = /failed to load stream|verification could not complete|verification cancelled|verification challenge expired|too many connection attempts[^.\\n]*/i;
+  var FAIL_TEXT = /failed to load stream|playback interrupted|video could not be loaded|verification could not complete|verification cancelled|verification challenge expired|too many connection attempts[^.\\n]*/i;
   var lastProblem = '';
   function checkProblems() {
     if (START.preload || !document.body) return;
@@ -302,7 +305,7 @@ ${GUARD}
     var m = text.match(AUTH_TEXT), kind = 'auth';
     if (!m) { m = text.match(FAIL_TEXT); kind = 'stream'; }
     var found = m ? m[0] : '';
-    if (found && found !== lastProblem) post({ type: 'problem', kind: kind, text: found });
+    if (found && found !== lastProblem) post({ type: 'problem', kind: kind, text: found, blocked: window.__kitsuneHeld() });
     lastProblem = found;
   }
   setInterval(liftChallenge, 700);

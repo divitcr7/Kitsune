@@ -10,6 +10,20 @@ import { Home } from './Home';
 import { ShowScreen } from './Show';
 import { Btn, Fox, Icon } from './kit';
 
+declare const KITSUNE_VERSION: string;
+declare const KITSUNE_NOTES: string;
+
+/** The version this TV last ran, so a new one can say what changed (TizenBrew updates modules by itself). */
+function newVersion() {
+  try {
+    const seen = localStorage.getItem('kitsune:version');
+    localStorage.setItem('kitsune:version', KITSUNE_VERSION);
+    return seen && seen !== KITSUNE_VERSION ? KITSUNE_VERSION : null;
+  } catch {
+    return null;
+  }
+}
+
 function useRoute() {
   const [route, setRoute] = useState(router.top());
   useEffect(() => router.subscribe(() => setRoute(router.top())), []);
@@ -27,7 +41,13 @@ export function App() {
   /** Pressed a key on this screen yet? Until then, a late-arriving preferred target takes focus. */
   const pressed = useRef(false);
   const [navHidden, setNavHidden] = useState(false);
+  const [updated, setUpdated] = useState<string | null>(() => newVersion());
   const leavingRef = useRef(false);
+  useEffect(() => {
+    if (!updated) return;
+    const id = setTimeout(() => setUpdated(null), 7000);
+    return () => clearTimeout(id);
+  }, [updated]);
   const beforeLeave = useRef<HTMLElement | null>(null);
   useEffect(() => {
     leavingRef.current = leaving;
@@ -157,6 +177,15 @@ export function App() {
     <div ref={root} style={{ position: 'absolute', left: 0, top: 0, width: 1920, height: 1080 }}>
       <Screen key={key} route={route} />
       {tab ? <Nav active={route.name} hidden={navHidden} /> : null}
+      {updated ? (
+        <div className="k-updated">
+          <Fox size={34} />
+          <div>
+            <div className="t-label">Kitsune updated to {updated}</div>
+            {KITSUNE_NOTES ? <div className="t-caption k-dim">{KITSUNE_NOTES}</div> : null}
+          </div>
+        </div>
+      ) : null}
       {leaving ? (
         <div className="k-modal" data-layer="">
           <div className="k-sheet">

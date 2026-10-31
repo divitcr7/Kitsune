@@ -10,6 +10,7 @@ import { Icon } from '@/components/Icon';
 import { Spinner } from '@/components/Spinner';
 import { T } from '@/components/T';
 import { haptics, NotificationFeedbackType } from '@/lib/haptics';
+import { canOpenBrowser, openInBrowser } from '@/lib/browser';
 import { accountScript, loginFillScript } from '@/lib/inject';
 import { usePlayer } from '@/lib/player';
 import { useStore } from '@/lib/store';
@@ -120,6 +121,14 @@ function PhoneAccount() {
             setLoading(false);
           }}
           onShouldStartLoadWithRequest={allow}
+          onHttpError={async (e) => {
+            // anime.nexus turns away its pages inside apps: use its account page in the browser,
+            // where episodes play while that lasts.
+            if (e.nativeEvent.statusCode >= 400 && (await canOpenBrowser())) {
+              router.back();
+              openInBrowser(START);
+            }
+          }}
           setSupportMultipleWindows={false}
           javaScriptCanOpenWindowsAutomatically={false}
           thirdPartyCookiesEnabled
@@ -336,6 +345,9 @@ function TvAccount() {
               if (page) web.current?.requestFocus();
             }}
             onShouldStartLoadWithRequest={allow}
+            onHttpError={(e) => {
+              if (e.nativeEvent.statusCode >= 400) fail('anime.nexus won’t open its sign-in page inside apps right now. Kitsune tries again by itself; nothing to fix on this TV.');
+            }}
             setSupportMultipleWindows={false}
             javaScriptCanOpenWindowsAutomatically={false}
             thirdPartyCookiesEnabled

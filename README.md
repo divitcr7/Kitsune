@@ -154,6 +154,8 @@ Samsung TVs (Tizen) get Kitsune as a [TizenBrew](https://github.com/reisxd/Tizen
 
 **"This episode won't start right now".** anime.nexus refused the stream for a moment, usually a short rate limit. Wait a minute and tap **Try again**. Kitsune also pauses its background preloading for a while so it doesn't make things worse.
 
+**Episodes open in Chrome instead of in Kitsune, or "anime.nexus won't play inside apps right now".** anime.nexus sometimes refuses to open its player inside apps. When it does, Kitsune hands the episode to your browser, where it plays (with the site's own page and ads), and tries its own player again every few hours. On a TV there's no browser to hand off to, so Kitsune says so instead. Nothing to fix on your side.
+
 **A "Verify you are human" box over the video.** That's Cloudflare, on anime.nexus's behalf. Tap it and playback continues. On a TV, Kitsune puts the remote's focus on it: press OK (Back leaves the player).
 
 ## How it works
@@ -204,11 +206,11 @@ The `android/` folder is generated from `app.json` by `expo prebuild` and is not
 
 1. Bump `expo.version` **and** `expo.android.versionCode` in `app.json` (versionCode must go up every release, or Android refuses the update). Keep `package.json`'s version in step.
 2. `npm run build:apk`. It writes `dist/Kitsune-vX.Y.Z.apk` and `dist/Kitsune-vX.Y.Z.apk.sha256`, signed with your release key.
-3. Publish a GitHub release tagged `vX.Y.Z` and attach both files. The release notes are what the in-app update sheet shows.
+3. Publish the release: `bash scripts/github-release.sh notes.md` (creates `vX.Y.Z` from `app.json`, attaches both files, uses your GitHub login). The notes are what the in-app update sheet shows.
 
 Attach exactly one `.apk` to a release, named `Kitsune-vX.Y.Z.apk`. Phones and TVs share it, and v1.0.1 picks the first file ending in `.apk`, so anything else ending in `.apk` could be installed in its place. (From v1.1.0 the app only accepts that exact name.)
 
-**Samsung TV module:** bump `version` in `tv/tizen/package.json`, then `npm run build:tizen && npm publish --access public ./tv/tizen`. TizenBrew loads the newest version from npm (through jsDelivr) on its next start. Don't make GitHub releases for it; if you want notes for it, mark them pre-release so `releases/latest` stays the APK.
+**Samsung TV module:** bump `version` (and `kitsuneNotes`, the line TVs show after updating) in `tv/tizen/package.json`, then `bash scripts/publish-tizen.sh <one-time code>`. It builds, publishes to npm and clears jsDelivr's cache, so TVs get the new version the next time TizenBrew starts. Don't make GitHub releases for it; if you want notes for it, mark them pre-release so `releases/latest` stays the APK.
 
 **Signing.** Without a keystore the APK is signed with the debug key. To sign with your own release key, create `~/.kitsune/keystore.properties` (or point `KITSUNE_KEYSTORE_PROPERTIES` at one) with `storeFile`, `storePassword`, `keyAlias` and `keyPassword`. Keys stay outside the repo; `.gitignore` also blocks `*.jks`, `*.p12`, `*.key` and `.env*.local`.
 

@@ -264,6 +264,20 @@ function UpdateRow() {
   );
 }
 
+/** While anime.nexus refuses the in-app player, say where episodes are going and that it's temporary. */
+function BlockedNote() {
+  // Cleared as soon as the in-app player works again.
+  const blocked = useStore((s) => s.blockedUntil > 0);
+  if (!blocked) return null;
+  return (
+    <T variant="caption" color={color.accent} style={{ marginTop: 12, lineHeight: 18 }}>
+      {isTV
+        ? 'anime.nexus is refusing to play inside apps right now. Kitsune tries again by itself every few hours.'
+        : 'anime.nexus is refusing to play inside apps right now, so episodes open in your browser. Kitsune switches back by itself once it can.'}
+    </T>
+  );
+}
+
 function About() {
   const version = appVersion;
   return (
@@ -281,6 +295,7 @@ function About() {
         </View>
       </View>
       <UpdateRow />
+      <BlockedNote />
       <T dim style={{ marginTop: 14 }}>
         Made by Divit. Ideas, bugs, or just want to say hi? Reach out anytime.
       </T>

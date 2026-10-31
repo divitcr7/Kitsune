@@ -1,6 +1,6 @@
 {
   "name": "@divit7/kitsune-tizen",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "appName": "Kitsune",
   "description": "Kitsune for Samsung TVs: anime.nexus with a cinematic 10-foot UI and no ads, as a TizenBrew module.",
   "packageType": "mods",
@@ -32,5 +32,6 @@
     "type": "git",
     "url": "git+https://github.com/divitcr7/Kitsune.git",
     "directory": "tv/tizen"
-  }
+  },
+  "kitsuneNotes": "Clearer error screens when anime.nexus won't start a video, and this notice when Kitsune updates."
 }

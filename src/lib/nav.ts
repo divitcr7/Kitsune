@@ -4,7 +4,8 @@ import { haptics } from './haptics';
 import { imgUrl } from './img';
 import { type Session, usePlayer } from './player';
 import { queryClient, q } from './queries';
-import { type EpisodeLite, lite, resumePoint, type ShowLite, useStore } from './store';
+import { canOpenBrowser, openInBrowser } from './browser';
+import { type EpisodeLite, inAppBlocked, lite, resumePoint, type ShowLite, useStore } from './store';
 
 /**
  * Whatever we already know about a show (from the card that was tapped) so the
@@ -42,14 +43,20 @@ function session(show: Show | ShowLite, episode: EpisodeLite): Session {
   };
 }
 
-export function playEpisode(show: Show | ShowLite, episode: EpisodeLite) {
+/** The episode's page on anime.nexus. */
+export const watchUrl = (episode: { id: string; slug: string }) => `https://anime.nexus/watch/${episode.id}/${episode.slug}`;
+
+export async function playEpisode(show: Show | ShowLite, episode: EpisodeLite) {
   useStore.getState().recordPlay(lite(show), episode);
   haptics.impact();
+  // While anime.nexus refuses the in-app player, go straight to the browser (where it plays).
+  if (inAppBlocked() && (await canOpenBrowser()) && (await openInBrowser(watchUrl(episode)))) return;
   usePlayer.getState().open(session(show, episode));
 }
 
 /** Loads `episode` in the hidden player so pressing Play on it is instant. */
 export function preloadEpisode(show: Show | ShowLite, episode: EpisodeLite) {
+  if (inAppBlocked()) return;
   usePlayer.getState().preload(session(show, episode));
 }
 

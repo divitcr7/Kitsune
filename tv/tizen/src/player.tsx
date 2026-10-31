@@ -59,7 +59,7 @@ function Player({ episode }: { episode: { id: string; slug: string } }) {
   const [osd, setOsd] = useState(true);
   const [controls, setControls] = useState(false);
   const [glyph, setGlyph] = useState<{ icon: IconName; text?: string; key: number } | null>(null);
-  const [problem, setProblem] = useState<{ kind: 'auth' | 'stream'; text: string } | null>(null);
+  const [problem, setProblem] = useState<{ kind: 'auth' | 'stream'; text: string; blocked?: string[] } | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [toast, setToast] = useState<{ text: string; key: number } | null>(null);
   const [pending, setPending] = useState<{ t: number; at: number } | null>(null);
@@ -180,7 +180,7 @@ function Player({ episode }: { episode: { id: string; slug: string } }) {
         if (m.type === 'toast' && m.text) say(m.text);
         if (m.type === 'problem' && m.text) {
           if (m.kind === 'auth') cmd('pause');
-          setProblem({ kind: m.kind === 'auth' ? 'auth' : 'stream', text: m.text });
+          setProblem({ kind: m.kind === 'auth' ? 'auth' : 'stream', text: m.text, blocked: m.blocked });
         }
       }, true),
     [], // eslint-disable-line react-hooks/exhaustive-deps
@@ -348,7 +348,7 @@ function Player({ episode }: { episode: { id: string; slug: string } }) {
         </div>
       ) : null}
 
-      {problem ? <Problem kind={problem.kind} text={problem.text} onRetry={retry} onSignIn={signIn} /> : null}
+      {problem ? <Problem kind={problem.kind} text={problem.text} blocked={problem.blocked} onRetry={retry} onSignIn={signIn} /> : null}
 
       {toast ? (
         <div className="p-toast" key={toast.key}>
@@ -360,7 +360,7 @@ function Player({ episode }: { episode: { id: string; slug: string } }) {
 }
 
 /** The site refused or paused the stream: say why in plain words and offer the way forward. */
-function Problem({ kind, text, onRetry, onSignIn }: { kind: 'auth' | 'stream'; text: string; onRetry: () => void; onSignIn: () => void }) {
+function Problem({ kind, text, blocked, onRetry, onSignIn }: { kind: 'auth' | 'stream'; text: string; blocked?: string[]; onRetry: () => void; onSignIn: () => void }) {
   const auth = kind === 'auth';
   return (
     <div className="p-panel" data-layer="">
@@ -390,6 +390,11 @@ function Problem({ kind, text, onRetry, onSignIn }: { kind: 'auth' | 'stream'; t
         <div className="t-caption k-faint" style={{ marginTop: 22 }}>
           anime.nexus says: “{text}”
         </div>
+        {blocked && blocked.length ? (
+          <div className="t-caption k-faint" style={{ marginTop: 8 }}>
+            Kitsune held back: {blocked.join(', ')}
+          </div>
+        ) : null}
       </div>
     </div>
   );

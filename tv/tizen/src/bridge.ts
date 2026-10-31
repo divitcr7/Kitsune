@@ -21,6 +21,8 @@ export type Msg = {
   audio?: string | null;
   subs?: string | null;
   fill?: boolean;
+  /** Hosts the guard held back, sent with a 'problem'. */
+  blocked?: string[];
 };
 
 const listeners: ((m: Msg) => void)[] = [];
