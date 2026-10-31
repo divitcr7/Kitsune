@@ -113,7 +113,7 @@ The APK above is the TV app too: one download for phones and TVs. On a TV it ope
 
 ## Samsung TV
 
-Samsung TVs (Tizen) get Kitsune as a [TizenBrew](https://github.com/reisxd/TizenBrew) module. A normal Samsung app can't run Kitsune's guard script inside anime.nexus's own player, and Samsung's store doesn't take unofficial clients, so it goes through TizenBrew: install it once with Developer Mode, then add the module `@divit7/kitsune-tizen`. Same look, same remote controls, same ad-free player. Step-by-step install, supported TVs and troubleshooting: **[tv/tizen/README.md](tv/tizen/README.md)**.
+Samsung TVs (Tizen) get Kitsune as a [TizenBrew](https://github.com/reisxd/TizenBrew) module. A normal Samsung app can't run Kitsune's guard script inside anime.nexus's own player, and Samsung's store doesn't take unofficial clients, so it goes through TizenBrew: install it once with Developer Mode, then add the module [`@divit7/kitsune-tizen`](https://www.npmjs.com/package/@divit7/kitsune-tizen). Same look, same remote controls, same ad-free player. Step-by-step install, supported TVs and troubleshooting: **[tv/tizen/README.md](tv/tizen/README.md)**.
 
 ## Troubleshooting
 
