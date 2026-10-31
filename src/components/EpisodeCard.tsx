@@ -6,9 +6,10 @@ import { audioLabel, minutes } from '@/lib/format';
 import { art } from '@/lib/img';
 import { openShow, playEpisode } from '@/lib/nav';
 import { fraction, type HistoryEntry, useStore } from '@/lib/store';
+import { isTV } from '@/lib/tv';
 import { color, radius } from '@/theme/tokens';
 import { Icon } from './Icon';
-import { PressableScale } from './PressableScale';
+import { FocusRing, PressableScale } from './PressableScale';
 import { T } from './T';
 
 /** Thin watched-progress line; hidden when nothing's watched. */
@@ -38,6 +39,7 @@ function Thumb({ image, fallback, width, children }: { image?: ImageSet; fallbac
       />
       <LinearGradient colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.8)']} locations={[0.5, 1]} style={StyleSheet.absoluteFill} />
       {children}
+      <FocusRing radius={radius.md} />
     </View>
   );
 }
@@ -84,9 +86,11 @@ export function ContinueCard({ entry, width = 280 }: { entry: HistoryEntry; widt
         <View style={styles.playRing}>
           <Icon name="play" size={22} tint="#fff" />
         </View>
-        <Pressable hitSlop={10} style={styles.close} onPress={() => remove(entry.show.id)} accessibilityLabel="Remove from Continue Watching">
-          <Icon name="close" size={14} tint="#fff" />
-        </Pressable>
+        {isTV ? null : (
+          <Pressable hitSlop={10} style={styles.close} onPress={() => remove(entry.show.id)} accessibilityLabel="Remove from Continue Watching">
+            <Icon name="close" size={14} tint="#fff" />
+          </Pressable>
+        )}
         <ProgressBar value={Math.max(0.03, fraction(p))} onDark style={styles.edgeBar} />
       </Thumb>
       <T variant="label" numberOfLines={1} style={styles.title}>

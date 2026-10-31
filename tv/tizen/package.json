@@ -1,0 +1,36 @@
+{
+  "name": "@divitcr7/kitsune-tizen",
+  "version": "0.1.0",
+  "appName": "Kitsune",
+  "description": "Kitsune for Samsung TVs: anime.nexus with a cinematic 10-foot UI and no ads, as a TizenBrew module.",
+  "packageType": "mods",
+  "websiteURL": "https://anime.nexus/robots.txt",
+  "main": "dist/kitsune.js",
+  "keys": [
+    "MediaPlayPause",
+    "MediaPlay",
+    "MediaPause",
+    "MediaStop",
+    "MediaFastForward",
+    "MediaRewind",
+    "MediaTrackNext",
+    "MediaTrackPrevious"
+  ],
+  "files": [
+    "dist/kitsune.js",
+    "README.md"
+  ],
+  "keywords": [
+    "tizenbrew",
+    "tizen",
+    "samsung",
+    "anime"
+  ],
+  "author": "Divit",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/divitcr7/Kitsune.git",
+    "directory": "tv/tizen"
+  }
+}

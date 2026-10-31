@@ -1,4 +1,3 @@
-import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -21,12 +20,17 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import type { ShouldStartLoadRequest, WebViewHttpErrorEvent } from 'react-native-webview/lib/WebViewTypes';
 import { queryClient } from '@/lib/queries';
-import { flushScript, pauseScript, playerScript, revealScript } from '@/lib/inject';
+import { haptics, NotificationFeedbackType } from '@/lib/haptics';
+import { flushScript, pauseScript, playerScript, revealScript, tvCommandScript, type TvCommand } from '@/lib/inject';
+import { findEpisode } from '@/lib/nav';
 import { type Session, usePlayer } from '@/lib/player';
 import { resumePoint, useStore } from '@/lib/store';
+import { isTV, tv } from '@/lib/tv';
 import { color, radius, spring } from '@/theme/tokens';
 import { Button, IconButton } from './Button';
+import { FocusBlock } from './FocusBlock';
 import { Icon } from './Icon';
+import { PlayerOsd, type Tick } from './PlayerOsd';
 import { Spinner } from './Spinner';
 import { T } from './T';
 
@@ -61,18 +65,21 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
   const uri = `https://anime.nexus/watch/${target.id}/${target.slug}`;
   const pageUrl = useRef(uri);
   // Built per load: whether it starts as a preload is decided when it's created.
-  const script = useMemo(() => playerScript({ id: target.id, t: target.t, preload: !visible }), [target]); // eslint-disable-line react-hooks/exhaustive-deps
+  const script = useMemo(() => playerScript({ id: target.id, t: target.t, preload: !visible, tv: isTV }), [target]); // eslint-disable-line react-hooks/exhaustive-deps
   // Android runs the "before content" script from onPageStarted, which can land before the new
   // document exists and be lost. The script is idempotent, so re-inject at every load milestone.
   const inject = () => web.current?.injectJavaScript(script);
 
   const show = useSharedValue(visible ? 1 : 0);
+  // TV: the OSD reads the page's once-a-second 'tick' straight from here.
+  const feedRef = useRef<((t: Tick) => void) | null>(null);
 
   // Becoming visible: rotate, go immersive, and start playback if it was preloaded.
   useEffect(() => {
     if (!visible) return;
     show.set(withTiming(1, { duration: 260, easing: Easing.out(Easing.cubic) }));
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+    // A TV is already landscape (and some boxes would honour a portrait lock, sideways).
+    if (!isTV) ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
     activateKeepAwakeAsync('player');
     web.current?.injectJavaScript(revealScript(session.startAt));
     const back = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -82,8 +89,10 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
     return () => {
       back.remove();
       deactivateKeepAwake('player');
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-      setVisibilityAsync('visible');
+      if (!isTV) {
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+        setVisibilityAsync('visible');
+      }
       queryClient.invalidateQueries({ queryKey: ['episodes', session.showId] });
     };
   }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -99,7 +108,7 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
     // Black out the page first: pausing makes the site flash its own overlays. Rotate back to
     // portrait behind the black, then fade out.
     setClosing(true);
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    if (!isTV) ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
     requestAnimationFrame(() => web.current?.injectJavaScript(flushScript));
     show.set(withDelay(240, withTiming(0, { duration: 200 }, (done) => done && scheduleOnRN(close))));
   }
@@ -117,6 +126,30 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
     setAttempt((n) => n + 1);
   }
 
+  /** Next / previous episode from the remote: load it in place, picking up where it was left. */
+  async function jump(step: 1 | -1) {
+    const cur = now.current;
+    const ep = await findEpisode(session.showId, cur.number + step).catch(() => undefined);
+    if (!ep) {
+      setToast({ text: step > 0 ? 'That’s the latest episode' : 'This is the first episode', key: Date.now() });
+      return;
+    }
+    web.current?.injectJavaScript(flushScript);
+    const entry = useStore.getState().history[session.showId];
+    if (entry) useStore.getState().recordPlay(entry.show, ep);
+    now.current = { id: ep.id, slug: ep.slug, number: ep.number };
+    pageUrl.current = `https://anime.nexus/watch/${ep.id}/${ep.slug}`;
+    setEpisode({ number: String(ep.number), title: ep.title ?? '' });
+    setProblem(null);
+    setFailed(false);
+    setVerifying(false);
+    setReady(false);
+    setTarget({ id: ep.id, slug: ep.slug, t: Math.floor(resumePoint(useStore.getState().progress[ep.id])) });
+    setAttempt((n) => n + 1);
+  }
+
+  const command = (cmd: TvCommand, arg?: number) => web.current?.injectJavaScript(tvCommandScript(cmd, arg));
+
   /** Close the player and open the anime.nexus account screen; playback resumes after sign-in. */
   function signIn() {
     const cur = now.current;
@@ -133,7 +166,7 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
   }
 
   function onMessage(e: WebViewMessageEvent) {
-    let msg: { type: string; id?: string; slug?: string; number?: number; t?: number; d?: number; text?: string; kind?: string; on?: boolean };
+    let msg: { type: string; id?: string; slug?: string; number?: number; t?: number; d?: number; text?: string; kind?: string; on?: boolean } & Partial<Tick>;
     try {
       msg = JSON.parse(e.nativeEvent.data);
     } catch {
@@ -145,8 +178,12 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
       setReady(false);
       if (msg.number) setEpisode({ number: String(msg.number), title: '' });
     }
+    if (msg.type === 'tick') {
+      feedRef.current?.({ t: msg.t ?? 0, d: msg.d ?? 0, paused: !!msg.paused, buffering: !!msg.buffering, audio: msg.audio ?? null, subs: msg.subs ?? null, fill: !!msg.fill });
+      return;
+    }
     if (msg.type === 'toast' && msg.text) {
-      Haptics.selectionAsync();
+      haptics.selection();
       setToast({ text: msg.text, key: Date.now() });
     }
     if (msg.type === 'progress' && msg.id && msg.slug && msg.d && Number.isFinite(msg.d)) {
@@ -154,13 +191,17 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
       now.current = { id: msg.id, slug: msg.slug, number: msg.number ?? now.current.number };
       if (msg.id !== session.episodeId && msg.number) setEpisode({ number: String(msg.number), title: '' });
     }
-    if (msg.type === 'verify') setVerifying(!!msg.on);
+    if (msg.type === 'verify') {
+      setVerifying(!!msg.on);
+      // TV: hand the remote to the page so it can reach the check (the script focuses it).
+      if (isTV && msg.on) setTimeout(() => web.current?.requestFocus(), 50);
+    }
     if (msg.type === 'signin') signIn();
     if (msg.type === 'problem' && msg.text) {
       // The site is refusing streams for now; stop preloading so we don't make it worse.
       usePlayer.getState().backOff();
       if (msg.kind === 'auth') web.current?.injectJavaScript(pauseScript);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      haptics.notify(NotificationFeedbackType.Warning);
       setProblem({ kind: msg.kind === 'auth' ? 'auth' : 'stream', text: msg.text });
     }
   }
@@ -185,59 +226,77 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
           <NavigationBar hidden />
         </>
       ) : null}
-      <WebView<object>
-        key={attempt}
-        ref={web}
-        source={{ uri }}
-        style={styles.web}
-        containerStyle={[styles.web, closing && styles.hidden]}
-        injectedJavaScriptBeforeContentLoaded={script}
-        injectedJavaScriptBeforeContentLoadedForMainFrameOnly
-        onMessage={onMessage}
-        onLoadStart={(e) => {
-          inject();
-          // A full page load to another episode: cover it with the loader until it plays.
-          const url = e.nativeEvent.url;
-          if (url !== pageUrl.current && url.includes('/watch/')) {
-            pageUrl.current = url;
+      <FocusBlock enabled={verifying} style={styles.web}>
+        <WebView<object>
+          key={attempt}
+          ref={web}
+          source={{ uri }}
+          style={styles.web}
+          containerStyle={[styles.web, closing && styles.hidden]}
+          injectedJavaScriptBeforeContentLoaded={script}
+          injectedJavaScriptBeforeContentLoadedForMainFrameOnly
+          onMessage={onMessage}
+          onLoadStart={(e) => {
+            inject();
+            // A full page load to another episode: cover it with the loader until it plays.
+            const url = e.nativeEvent.url;
+            if (url !== pageUrl.current && url.includes('/watch/')) {
+              pageUrl.current = url;
+              setReady(false);
+              setEpisode({ number: '', title: '' });
+            }
+          }}
+          onLoadProgress={inject}
+          onLoadEnd={inject}
+          onShouldStartLoadWithRequest={allow}
+          setSupportMultipleWindows
+          onOpenWindow={() => {
+            /* popups go nowhere */
+          }}
+          javaScriptCanOpenWindowsAutomatically={false}
+          allowsFullscreenVideo
+          allowsInlineMediaPlayback
+          mediaPlaybackRequiresUserAction={false}
+          thirdPartyCookiesEnabled
+          sharedCookiesEnabled
+          domStorageEnabled
+          setBuiltInZoomControls={false}
+          overScrollMode="never"
+          androidLayerType="hardware"
+          webviewDebuggingEnabled={__DEV__}
+          onError={() => setFailed(true)}
+          onHttpError={(e: WebViewHttpErrorEvent) => {
+            if (e.nativeEvent.statusCode >= 500) setFailed(true);
+          }}
+          onRenderProcessGone={() => {
             setReady(false);
-            setEpisode({ number: '', title: '' });
-          }
-        }}
-        onLoadProgress={inject}
-        onLoadEnd={inject}
-        onShouldStartLoadWithRequest={allow}
-        setSupportMultipleWindows
-        onOpenWindow={() => {
-          /* popups go nowhere */
-        }}
-        javaScriptCanOpenWindowsAutomatically={false}
-        allowsFullscreenVideo
-        allowsInlineMediaPlayback
-        mediaPlaybackRequiresUserAction={false}
-        thirdPartyCookiesEnabled
-        sharedCookiesEnabled
-        domStorageEnabled
-        setBuiltInZoomControls={false}
-        overScrollMode="never"
-        androidLayerType="hardware"
-        webviewDebuggingEnabled={__DEV__}
-        onError={() => setFailed(true)}
-        onHttpError={(e: WebViewHttpErrorEvent) => {
-          if (e.nativeEvent.statusCode >= 500) setFailed(true);
-        }}
-        onRenderProcessGone={() => {
-          setReady(false);
-          setAttempt((n) => n + 1);
-        }}
-      />
+            setAttempt((n) => n + 1);
+          }}
+        />
+      </FocusBlock>
       {visible && (!ready || failed) && !verifying && !problem ? (
         <Loader name={session.showName} number={episode.number} title={episode.title} thumb={session.thumb} failed={failed} onRetry={retry} />
+      ) : null}
+      {isTV && visible && ready && !failed && !problem && !verifying && !closing ? (
+        <PlayerOsd
+          title={session.showName}
+          episode={episode.number ? `Episode ${episode.number}` : 'Now playing'}
+          feedRef={feedRef}
+          onCommand={command}
+          onJump={jump}
+          onExit={exit}
+        />
+      ) : null}
+      {isTV && visible && verifying && !problem ? (
+        <View pointerEvents="none" style={styles.verifyHint}>
+          <T variant="label">Use the remote to tick the box  ·  Back to leave</T>
+        </View>
       ) : null}
       {visible && problem ? <Problem kind={problem.kind} text={problem.text} onRetry={retry} onSignIn={signIn} /> : null}
       {toast && !problem ? <Toast key={toast.key} text={toast.text} onDone={() => setToast(null)} /> : null}
       {closing ? <View style={[StyleSheet.absoluteFill, styles.blackout]} /> : null}
-      {visible && !closing && (!ready || failed || verifying || problem) ? (
+      {/* A TV has a Back key; a focusable button here would only steal the remote. */}
+      {!isTV && visible && !closing && (!ready || failed || verifying || problem) ? (
         <View style={styles.back}>
           <IconButton icon="arrow-left" label="Close player" variant="scrim" onPress={exit} />
         </View>
@@ -280,7 +339,7 @@ function Problem({ kind, text, onRetry, onSignIn }: { kind: 'auth' | 'stream'; t
             : 'anime.nexus couldn’t start the stream. That’s usually a short limit on their side, so give it a minute and try again. Signing in to anime.nexus helps too.'}
         </T>
         <View style={styles.problemActions}>
-          <Button label={auth ? 'Sign in' : 'Try again'} icon={auth ? 'login' : 'refresh'} size="sm" onPress={auth ? onSignIn : onRetry} />
+          <Button label={auth ? 'Sign in' : 'Try again'} icon={auth ? 'login' : 'refresh'} size="sm" hasTVPreferredFocus onPress={auth ? onSignIn : onRetry} />
           <Button label={auth ? 'Try again' : 'Sign in'} variant="secondary" size="sm" onPress={auth ? onRetry : onSignIn} />
         </View>
         <T variant="caption" faint numberOfLines={2} style={styles.problemNote}>
@@ -309,7 +368,7 @@ function Loader({ name, number, title, thumb, failed, onRetry }: { name: string;
             {title}
           </T>
         ) : null}
-        {failed ? <Button label="Try again" icon="refresh" size="sm" onPress={onRetry} style={{ marginTop: 20 }} /> : null}
+        {failed ? <Button label="Try again" icon="refresh" size="sm" hasTVPreferredFocus onPress={onRetry} style={{ marginTop: 20 }} /> : null}
       </View>
     </View>
   );
@@ -329,6 +388,7 @@ const styles = StyleSheet.create({
   problemActions: { flexDirection: 'row', gap: 10, marginTop: 18 },
   problemNote: { marginTop: 14, textAlign: 'center' },
   toastWrap: { position: 'absolute', bottom: 24, alignSelf: 'center' },
+  verifyHint: { position: 'absolute', bottom: tv(28), alignSelf: 'center', paddingHorizontal: tv(18), paddingVertical: tv(10), borderRadius: radius.pill, backgroundColor: 'rgba(28,28,32,0.95)' },
   toast: { paddingHorizontal: 18, paddingVertical: 11, borderRadius: radius.pill, backgroundColor: 'rgba(28,28,32,0.95)', borderWidth: StyleSheet.hairlineWidth, borderColor: color.line },
 });
 

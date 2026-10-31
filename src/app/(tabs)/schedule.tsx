@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
+import Animated, { useAnimatedScrollHandler, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Appear } from '@/components/Appear';
 import { Icon } from '@/components/Icon';
@@ -15,12 +15,15 @@ import { broadcastTime, WEEKDAYS } from '@/lib/format';
 import { art } from '@/lib/img';
 import { openShow } from '@/lib/nav';
 import { q } from '@/lib/queries';
+import { EDGE, isTV, rowFocus, tv, TV_NAV } from '@/lib/tv';
 import { useSignal } from '@/lib/ui';
 import { color, radius, TAB_BAR_HEIGHT } from '@/theme/tokens';
 
 // Monday-first week.
 const DAYS = [1, 2, 3, 4, 5, 6, 0].map((d) => WEEKDAYS[d]);
 const HEADER = 112;
+// TV: the day tabs sit under the navigation bar (no large title).
+const TV_HEADER = TV_NAV + tv(64);
 
 export default function Schedule() {
   const { width } = useWindowDimensions();
@@ -46,10 +49,24 @@ export default function Schedule() {
 
   const go = (i: number) => {
     setIndex(i);
-    pager.current?.scrollToOffset({ offset: i * width, animated: true });
+    if (isTV) position.set(withTiming(i, { duration: 220 }));
+    else pager.current?.scrollToOffset({ offset: i * width, animated: true });
   };
 
   useSignal('reselect:schedule', () => go(today));
+
+  const tabs = <Tabs items={DAYS.map((d, i) => ({ key: d, label: d.slice(0, 3), dot: i === today }))} index={index} onChange={go} position={position} />;
+
+  // A remote moves focus, not pages: show just the chosen day, so focus can't wander into the
+  // day next door. Day tabs change on focus.
+  if (isTV) {
+    return (
+      <View style={styles.fill}>
+        <Day key={DAYS[index]} width={width} shows={byDay[DAYS[index]]} loading={schedule.isPending} top={TV_HEADER} bottom={tv(40)} />
+        <View style={[styles.header, styles.tvHeader]}>{tabs}</View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.fill}>
@@ -74,7 +91,7 @@ export default function Schedule() {
         <T variant="hero" style={styles.title}>
           Schedule
         </T>
-        <Tabs items={DAYS.map((d, i) => ({ key: d, label: d.slice(0, 3), dot: i === today }))} index={index} onChange={go} position={position} />
+        {tabs}
       </View>
     </View>
   );
@@ -90,7 +107,7 @@ function Day({ width, shows, loading, top, bottom }: { width: number; shows?: Sh
       onScroll={onScroll}
       scrollEventThrottle={16}
       showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingTop: top + 8, paddingBottom: bottom, paddingHorizontal: 20 }}
+      contentContainerStyle={{ paddingTop: top + 8, paddingBottom: bottom, paddingHorizontal: EDGE }}
       initialNumToRender={8}
       windowSize={7}
       ListEmptyComponent={
@@ -123,7 +140,7 @@ function Row({ show, first }: { show: Show; first: boolean }) {
   const poster = art(show.poster, 'poster', '240x360');
   const time = broadcastTime(show.broadcast);
   return (
-    <Pressable onPress={() => openShow(show)} style={({ pressed }) => [styles.row, !first && styles.rule, pressed && { opacity: 0.6 }]}>
+    <Pressable onPress={() => openShow(show)} style={({ pressed, focused }) => [styles.row, !first && styles.rule, pressed && { opacity: 0.6 }, focused && rowFocus]}>
       <View style={styles.time}>
         <T variant="label" style={{ fontWeight: '700' }}>
           {time ?? 'TBA'}
@@ -152,10 +169,11 @@ function Row({ show, first }: { show: Show; first: boolean }) {
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: color.bg },
   header: { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: color.bg },
+  tvHeader: { paddingTop: TV_NAV + tv(12), paddingHorizontal: EDGE },
   title: { marginTop: 6, marginLeft: 20, height: 48 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12 },
   rule: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: color.line },
-  time: { width: 64 },
-  poster: { width: 52, height: 78, borderRadius: radius.sm, overflow: 'hidden', backgroundColor: color.container2 },
+  time: { width: isTV ? tv(72) : 64 },
+  poster: { width: isTV ? tv(46) : 52, height: isTV ? tv(69) : 78, borderRadius: radius.sm, overflow: 'hidden', backgroundColor: color.container2 },
   empty: { alignItems: 'center', marginTop: 60 },
 });

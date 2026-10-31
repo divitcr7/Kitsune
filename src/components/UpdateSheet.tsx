@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
-import { AppState, Pressable, StyleSheet, View } from 'react-native';
-import Animated, { Easing, FadeIn, FadeOut, SlideInDown, SlideOutDown } from 'react-native-reanimated';
+import { AppState, BackHandler, Pressable, StyleSheet, TVFocusGuideView, View } from 'react-native';
+import Animated, { Easing, FadeIn, FadeOut, SlideInDown, SlideOutDown, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePlayer } from '@/lib/player';
+import { isTV, tv } from '@/lib/tv';
 import { appVersion, isDownloaded, useUpdates } from '@/lib/updates';
 import { color, radius } from '@/theme/tokens';
 import { Button } from './Button';
@@ -26,8 +27,20 @@ export function UpdateSheet() {
     };
   }, [check]);
 
-  if (!prompt || !release || playing) return null;
+  const shown = prompt && !!release && !playing;
   const busy = status === 'downloading' || status === 'installing';
+
+  // Back means "Later" (and does nothing mid-download), instead of leaving the screen behind.
+  useEffect(() => {
+    if (!shown) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!busy) later();
+      return true;
+    });
+    return () => sub.remove();
+  }, [shown, busy, later]);
+
+  if (!shown) return null;
   const mb = Math.round(release.apk.size / 1_000_000);
 
   return (
@@ -36,61 +49,85 @@ export function UpdateSheet() {
         <Pressable style={StyleSheet.absoluteFill} onPress={busy ? undefined : later} accessibilityLabel="Later" />
       </Animated.View>
       <Animated.View
-        entering={SlideInDown.duration(280).easing(Easing.out(Easing.cubic))}
-        exiting={SlideOutDown.duration(200)}
-        style={[styles.sheet, { paddingBottom: insets.bottom + 20 }]}
+        entering={isTV ? ZoomIn.duration(220) : SlideInDown.duration(280).easing(Easing.out(Easing.cubic))}
+        exiting={isTV ? FadeOut.duration(160) : SlideOutDown.duration(200)}
+        style={isTV ? styles.dialog : [styles.sheet, { paddingBottom: insets.bottom + 20 }]}
       >
-        <View style={styles.head}>
-          <Fox size={44} />
-          <View style={{ flex: 1 }}>
-            <T variant="title">Kitsune {release.version} is here</T>
-            <T variant="caption" faint style={{ marginTop: 2 }}>
-              You have {appVersion}  ·  {mb} MB download
-            </T>
-          </View>
-        </View>
-
-        {release.notes ? (
-          <T dim numberOfLines={8} style={styles.notes}>
-            {release.notes}
-          </T>
-        ) : null}
-
-        {busy ? (
-          <View style={styles.progress}>
-            <ProgressBar value={Math.max(0.02, progress)} style={{ height: 4 }} />
-            <T variant="caption" dim style={{ marginTop: 8 }}>
-              {status === 'installing' ? 'Opening the installer…' : `Downloading… ${Math.round(progress * 100)}%`}
-            </T>
-          </View>
-        ) : (
-          <>
-            {error ? (
-              <T variant="caption" color={color.danger} style={{ marginTop: 14 }}>
-                {error}
+        {/* On a TV the remote stays inside the dialog until it's dismissed. */}
+        <Trap>
+          <View style={styles.head}>
+            <Fox size={44} />
+            <View style={{ flex: 1 }}>
+              <T variant="title">Kitsune {release.version} is here</T>
+              <T variant="caption" faint style={{ marginTop: 2 }}>
+                You have {appVersion}  ·  {mb} MB download
               </T>
-            ) : null}
-            <Button
-              label={error ? 'Try again' : isDownloaded(release) ? 'Install update' : 'Update now'}
-              icon="download"
-              size="lg"
-              onPress={update}
-              style={{ marginTop: 18 }}
-            />
-            <Button label="Later" variant="text" size="sm" onPress={later} style={{ alignSelf: 'center', marginTop: 6 }} />
-          </>
-        )}
+            </View>
+          </View>
 
-        <T variant="caption" faint style={styles.foot}>
-          Downloaded from Kitsune’s GitHub releases and checked before installing. Android asks once to allow installs from Kitsune. Your list and history stay.
-        </T>
+          {release.notes ? (
+            <T dim numberOfLines={8} style={styles.notes}>
+              {release.notes}
+            </T>
+          ) : null}
+
+          {busy ? (
+            <View style={styles.progress}>
+              <ProgressBar value={Math.max(0.02, progress)} style={{ height: 4 }} />
+              <T variant="caption" dim style={{ marginTop: 8 }}>
+                {status === 'installing' ? 'Opening the installer…' : `Downloading… ${Math.round(progress * 100)}%`}
+              </T>
+            </View>
+          ) : (
+            <>
+              {error ? (
+                <T variant="caption" color={color.danger} style={{ marginTop: 14 }}>
+                  {error}
+                </T>
+              ) : null}
+              <Button
+                label={error ? 'Try again' : isDownloaded(release) ? 'Install update' : 'Update now'}
+                icon="download"
+                size="lg"
+                hasTVPreferredFocus
+                onPress={update}
+                style={{ marginTop: 18 }}
+              />
+              <Button label="Later" variant="text" size="sm" onPress={later} style={{ alignSelf: 'center', marginTop: 6 }} />
+            </>
+          )}
+
+          <T variant="caption" faint style={styles.foot}>
+            Downloaded from Kitsune’s GitHub releases and checked before installing. Android asks once to allow installs from Kitsune. Your list and history stay.
+          </T>
+        </Trap>
       </Animated.View>
     </View>
   );
 }
 
+function Trap({ children }: { children: React.ReactNode }) {
+  if (!isTV) return <>{children}</>;
+  return (
+    <TVFocusGuideView autoFocus trapFocusUp trapFocusDown trapFocusLeft trapFocusRight>
+      {children}
+    </TVFocusGuideView>
+  );
+}
+
 const styles = StyleSheet.create({
   scrim: { backgroundColor: 'rgba(0,0,0,0.6)' },
+  dialog: {
+    position: 'absolute',
+    alignSelf: 'center',
+    top: '14%',
+    width: tv(520),
+    padding: tv(28),
+    borderRadius: radius.xl,
+    backgroundColor: color.container1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.line,
+  },
   sheet: {
     position: 'absolute',
     left: 0,

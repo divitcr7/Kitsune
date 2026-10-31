@@ -12,6 +12,8 @@ import { create } from 'zustand';
  * do is notice, download in the app, check the file, and hand it to the system installer.
  */
 const LATEST = 'https://api.github.com/repos/divitcr7/Kitsune/releases/latest';
+// Only the app's own APK, matched by its exact name: any other file on a release is never installed.
+const APK = /^Kitsune-v\d+\.\d+\.\d+\.apk$/;
 const CHECK_EVERY = 6 * 60 * 60_000;
 const SAVED = 'kitsune-update';
 
@@ -122,8 +124,8 @@ export const useUpdates = create<State>((set, get) => ({
       if (!res.ok) throw new Error(String(res.status));
       const j = await res.json();
       const assets: { name: string; browser_download_url: string; size: number }[] = j.assets ?? [];
-      const apk = assets.find((a) => a.name.endsWith('.apk'));
-      const sum = assets.find((a) => a.name.endsWith('.apk.sha256'));
+      const apk = assets.find((a) => APK.test(a.name));
+      const sum = apk && assets.find((a) => a.name === `${apk.name}.sha256`);
       const version = String(j.tag_name ?? '').replace(/^v/, '');
       const release: Release | null =
         apk && isNewer(version, appVersion)

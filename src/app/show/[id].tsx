@@ -20,15 +20,20 @@ import { playEpisode, preloadEpisode, previewOf } from '@/lib/nav';
 import { usePlayer } from '@/lib/player';
 import { q } from '@/lib/queries';
 import { type EpisodeLite, fraction, resumePoint, useStore } from '@/lib/store';
+import { EDGE, isTV, rowFocus, tv } from '@/lib/tv';
 import { color, radius } from '@/theme/tokens';
 
 const PER_PAGE = 100;
+// TV: a snap offset past the item's own top clamps to 0, so focus on Play, the actions or the
+// synopsis brings the page back to the very top (title art and all).
+const TO_TOP = 100_000;
 
 export default function ShowScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const heroH = Math.round(width * 1.25);
+  // Phone: tall poster art. TV: 16:9 key art filling most of the screen, the details over its foot.
+  const heroH = isTV ? Math.round(height * 0.78) : Math.round(width * 1.25);
 
   const show = useQuery({ ...q.show(id), placeholderData: previewOf(id) });
   const stats = useQuery(q.stats(id));
@@ -41,9 +46,15 @@ export default function ShowScreen() {
 
   return (
     <View style={styles.fill}>
-      <Animated.ScrollView onScroll={onScroll} scrollEventThrottle={16} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 48 }}>
+      <Animated.ScrollView
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+        showsVerticalScrollIndicator={false}
+        snapToAlignment={isTV ? 'item' : undefined}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 48 }}
+      >
         <Backdrop show={s} height={heroH} scrollY={scrollY} />
-        <View style={[styles.head, { marginTop: heroH - 150 }]}>
+        <View style={[styles.head, isTV ? tvs.head : null, { marginTop: isTV ? Math.round(heroH * 0.3) : heroH - 150 }]}>
           {s ? (
             <Appear distance={16}>
               <Title show={s} />
@@ -53,19 +64,24 @@ export default function ShowScreen() {
         {s ? <Body show={s} stats={stats.data} /> : <BodySkeleton />}
       </Animated.ScrollView>
 
-      <TopBar
-        scrollY={scrollY}
-        from={heroH - 260}
-        to={heroH - 140}
-        title={s?.name}
-        left={<IconButton icon="arrow-left" label="Back" variant="scrim" onPress={() => router.back()} />}
-      />
+      {/* A TV has a Back key; the bar would only take focus. */}
+      {isTV ? null : (
+        <TopBar
+          scrollY={scrollY}
+          from={heroH - 260}
+          to={heroH - 140}
+          title={s?.name}
+          left={<IconButton icon="arrow-left" label="Back" variant="scrim" onPress={() => router.back()} />}
+        />
+      )}
     </View>
   );
 }
 
 function Backdrop({ show, height, scrollY }: { show?: Show; height: number; scrollY: SharedValue<number> }) {
-  const image = art(show?.poster ?? show?.background, show?.poster ? 'poster' : 'background', show?.poster ? '1560x2340' : '1360x768');
+  const image = isTV
+    ? art(show?.background ?? show?.backdrop ?? show?.poster, show?.background ? 'background' : show?.backdrop ? 'backdrop' : 'poster', '1920x1080')
+    : art(show?.poster ?? show?.background, show?.poster ? 'poster' : 'background', show?.poster ? '1560x2340' : '1360x768');
   const style = useAnimatedStyle(() => {
     const y = scrollY.value;
     if (y < 0) return { transform: [{ translateY: y / 2 }, { scale: 1 + -y / height }] };
@@ -84,6 +100,9 @@ function Backdrop({ show, height, scrollY }: { show?: Show; height: number; scro
         locations={[0, 0.2, 0.5, 0.78, 1]}
         style={StyleSheet.absoluteFill}
       />
+      {isTV ? (
+        <LinearGradient colors={['rgba(0,0,0,0.9)', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0)']} locations={[0, 0.45, 0.8]} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={StyleSheet.absoluteFill} />
+      ) : null}
     </Animated.View>
   );
 }
@@ -92,11 +111,11 @@ function Backdrop({ show, height, scrollY }: { show?: Show; height: number; scro
 function Title({ show }: { show: Show }) {
   const logo = imgUrl(show.logo, 'logo', 'large');
   return (
-    <View style={styles.titleWrap}>
+    <View style={[styles.titleWrap, isTV && tvs.titleWrap]}>
       {logo ? (
-        <Image source={{ uri: logo }} contentFit="contain" style={styles.logo} transition={300} accessibilityLabel={show.name} />
+        <Image source={{ uri: logo }} contentFit="contain" contentPosition={isTV ? 'left' : 'center'} style={isTV ? tvs.logo : styles.logo} transition={300} accessibilityLabel={show.name} />
       ) : (
-        <T variant="hero" numberOfLines={3} style={styles.name}>
+        <T variant="hero" numberOfLines={3} style={isTV ? null : styles.name}>
           {show.name}
         </T>
       )}
@@ -137,65 +156,69 @@ function Body({ show, stats }: { show: Show; stats?: Stats }) {
 
   return (
     <Appear distance={10}>
-      <View style={styles.metaRow}>
-        {score ? (
-          <View style={styles.score}>
-            <Icon name="star" size={13} tint={color.star} />
-            <T variant="caption" style={{ fontWeight: '700' }}>
-              {score.toFixed(1)}
-            </T>
-          </View>
-        ) : null}
-        <T variant="caption" dim numberOfLines={1}>
-          {meta.join('  ·  ')}
-        </T>
-      </View>
-      {show.genres?.length ? (
-        <T variant="caption" faint numberOfLines={1} style={styles.genreLine}>
-          {show.genres
-            .slice(0, 4)
-            .map((g) => g.name)
-            .join('  ·  ')}
-        </T>
-      ) : null}
-
-      <View style={styles.play}>
-        <Button
-          size="lg"
-          icon="play"
-          disabled={!upNext}
-          label={upNext ? `${resumeAt ? 'Resume' : 'Play'} Episode ${upNext.number}` : 'Play'}
-          sub={resumeAt && lastProgress ? `· ${clock(lastProgress.d - lastProgress.t)} left` : undefined}
-          onPress={() => upNext && playEpisode(show, upNext)}
-        />
-        {resumeAt && lastProgress ? <ProgressBar value={fraction(lastProgress)} style={styles.playBar} /> : null}
-      </View>
-
-      <View style={styles.actions}>
-        <Action icon={inList ? 'check' : 'plus'} label="My List" active={inList} onPress={() => toggle(show)} />
-        <Action icon="share-variant-outline" label="Share" onPress={() => Share.share({ message: `${show.name}\n${webUrl(`/series/${show.id}/${show.slug}`)}` })} />
-        <Action
-          icon={order === 'asc' ? 'sort-numeric-ascending' : 'sort-numeric-descending'}
-          label={order === 'asc' ? 'Oldest first' : 'Newest first'}
-          onPress={() => {
-            setOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
-            setPage(1);
-          }}
-        />
-      </View>
-
-      {show.description ? (
-        <Pressable style={styles.section} onPress={() => setExpanded((v) => !v)}>
-          <T dim numberOfLines={expanded ? undefined : 3} style={styles.synopsis}>
-            {show.description.trim()}
+      <View style={isTV ? tvs.column : null} scrollSnapOffset={isTV ? TO_TOP : undefined}>
+        <View style={[styles.metaRow, isTV && tvs.left]}>
+          {score ? (
+            <View style={styles.score}>
+              <Icon name="star" size={13} tint={color.star} />
+              <T variant="caption" style={{ fontWeight: '700' }}>
+                {score.toFixed(1)}
+              </T>
+            </View>
+          ) : null}
+          <T variant="caption" dim numberOfLines={1}>
+            {meta.join('  ·  ')}
           </T>
-          {expanded ? null : (
-            <T variant="micro" style={{ marginTop: 6 }}>
-              More
+        </View>
+        {show.genres?.length ? (
+          <T variant="caption" faint numberOfLines={1} style={[styles.genreLine, isTV && tvs.leftText]}>
+            {show.genres
+              .slice(0, 4)
+              .map((g) => g.name)
+              .join('  ·  ')}
+          </T>
+        ) : null}
+
+        <View style={[styles.play, isTV && tvs.play]}>
+          <Button
+            size="lg"
+            icon="play"
+            // Play can't take focus while it's disabled; claim it as soon as the episodes arrive.
+            hasTVPreferredFocus={!!upNext}
+            disabled={!upNext}
+            label={upNext ? `${resumeAt ? 'Resume' : 'Play'} Episode ${upNext.number}` : 'Play'}
+            sub={resumeAt && lastProgress ? `· ${clock(lastProgress.d - lastProgress.t)} left` : undefined}
+            onPress={() => upNext && playEpisode(show, upNext)}
+          />
+          {resumeAt && lastProgress ? <ProgressBar value={fraction(lastProgress)} style={styles.playBar} /> : null}
+        </View>
+
+        <View style={[styles.actions, isTV && tvs.actions]}>
+          <Action icon={inList ? 'check' : 'plus'} label="My List" active={inList} onPress={() => toggle(show)} />
+          {isTV ? null : <Action icon="share-variant-outline" label="Share" onPress={() => Share.share({ message: `${show.name}\n${webUrl(`/series/${show.id}/${show.slug}`)}` })} />}
+          <Action
+            icon={order === 'asc' ? 'sort-numeric-ascending' : 'sort-numeric-descending'}
+            label={order === 'asc' ? 'Oldest first' : 'Newest first'}
+            onPress={() => {
+              setOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
+              setPage(1);
+            }}
+          />
+        </View>
+
+        {show.description ? (
+          <Pressable style={({ focused }) => [styles.section, focused && tvs.synopsisFocus]} onPress={() => setExpanded((v) => !v)}>
+            <T dim numberOfLines={expanded ? undefined : 3} style={styles.synopsis}>
+              {show.description.trim()}
             </T>
-          )}
-        </Pressable>
-      ) : null}
+            {expanded ? null : (
+              <T variant="micro" style={{ marginTop: 6 }}>
+                More
+              </T>
+            )}
+          </Pressable>
+        ) : null}
+      </View>
 
       <View style={styles.epHead}>
         <T variant="title">Episodes</T>
@@ -300,7 +323,7 @@ function EpisodeRow({ show, ep, current }: { show: Show; ep: Episode; current: b
   const thumb = art(ep.image, 'episode', '640x360');
   const tags = [ep.is_filler ? 'Filler' : null, ep.is_recap ? 'Recap' : null].filter(Boolean);
   return (
-    <Pressable onPress={() => playEpisode(show, ep)} style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}>
+    <Pressable onPress={() => playEpisode(show, ep)} style={({ pressed, focused }) => [styles.row, pressed && { opacity: 0.6 }, focused && tvs.rowFocus]}>
       <View style={styles.rowThumb}>
         <Image source={thumb.source} placeholder={thumb.placeholder} placeholderContentFit="cover" contentFit="cover" transition={200} recyclingKey={ep.id} style={StyleSheet.absoluteFill} />
         <View style={styles.rowPlay}>
@@ -342,23 +365,37 @@ const styles = StyleSheet.create({
   titleWrap: { alignItems: 'center' },
   logo: { width: '86%', height: 96 },
   name: { textAlign: 'center' },
-  metaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 20, marginTop: 16 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: EDGE, marginTop: 16 },
   score: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  genreLine: { textAlign: 'center', marginTop: 6, paddingHorizontal: 20 },
-  play: { paddingHorizontal: 20, marginTop: 20 },
+  genreLine: { textAlign: 'center', marginTop: 6, paddingHorizontal: EDGE },
+  play: { paddingHorizontal: EDGE, marginTop: 20 },
   playBar: { marginTop: 10, marginHorizontal: 4 },
-  actions: { flexDirection: 'row', justifyContent: 'space-evenly', paddingHorizontal: 20, marginTop: 18 },
-  section: { paddingHorizontal: 20, marginTop: 18 },
+  actions: { flexDirection: 'row', justifyContent: 'space-evenly', paddingHorizontal: EDGE, marginTop: 18 },
+  section: { paddingHorizontal: EDGE, marginTop: 18 },
   synopsis: { fontSize: 14, lineHeight: 21 },
-  chips: { paddingHorizontal: 20, gap: 8, marginTop: 4, marginBottom: 6 },
-  epHead: { flexDirection: 'row', alignItems: 'baseline', gap: 8, paddingHorizontal: 20, marginTop: 30, marginBottom: 10 },
-  episodes: { paddingHorizontal: 20, marginTop: 8 },
+  chips: { paddingHorizontal: EDGE, gap: 8, marginTop: 4, marginBottom: 6 },
+  epHead: { flexDirection: 'row', alignItems: 'baseline', gap: 8, paddingHorizontal: EDGE, marginTop: 30, marginBottom: 10 },
+  episodes: { paddingHorizontal: EDGE, marginTop: 8 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 },
-  rowThumb: { width: 142, height: 80, borderRadius: radius.sm, overflow: 'hidden', backgroundColor: color.container2 },
+  rowThumb: { width: isTV ? tv(160) : 142, height: isTV ? tv(90) : 80, borderRadius: radius.sm, overflow: 'hidden', backgroundColor: color.container2 },
   rowPlay: { position: 'absolute', left: 6, bottom: 6, width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
   rowBar: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   rowText: { flex: 1 },
-  info: { paddingHorizontal: 20, marginTop: 24 },
+  info: { paddingHorizontal: EDGE, marginTop: 24 },
   infoGrid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 18 },
-  infoItem: { width: '50%', paddingRight: 12 },
+  infoItem: { width: isTV ? '25%' : '50%', paddingRight: 12 },
+});
+
+// TV: the details sit left over the key art, in a column you can read without turning your head.
+const tvs = StyleSheet.create({
+  head: { paddingHorizontal: EDGE, minHeight: tv(100) },
+  titleWrap: { alignItems: 'flex-start' },
+  logo: { width: tv(340), height: tv(110) },
+  column: { width: tv(520) },
+  left: { justifyContent: 'flex-start' },
+  leftText: { textAlign: 'left' },
+  play: { alignSelf: 'flex-start' },
+  actions: { justifyContent: 'flex-start', gap: tv(16) },
+  synopsisFocus: isTV ? { backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: tv(10) } : {},
+  rowFocus: rowFocus,
 });

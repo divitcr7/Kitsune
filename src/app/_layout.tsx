@@ -2,10 +2,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { Stack } from 'expo-router';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { iconFont } from '@/components/Icon';
@@ -13,6 +14,7 @@ import { Intro } from '@/components/Intro';
 import { PlayerHost } from '@/components/Player';
 import { UpdateSheet } from '@/components/UpdateSheet';
 import { queryClient } from '@/lib/queries';
+import { isTV } from '@/lib/tv';
 import { color } from '@/theme/tokens';
 
 SplashScreen.preventAutoHideAsync();
@@ -23,6 +25,12 @@ const persister = createAsyncStoragePersister({ storage: AsyncStorage, key: 'kit
 export default function RootLayout() {
   const [restored, setRestored] = useState(false);
   const [fonts] = useFonts(iconFont);
+
+  // Phones are portrait apart from the player. The manifest no longer says so (a portrait-only
+  // app shows up sideways on some TV boxes), so lock it here; a TV keeps its own orientation.
+  useEffect(() => {
+    if (!isTV) ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+  }, []);
 
   return (
     <GestureHandlerRootView style={styles.root}>
@@ -44,8 +52,8 @@ export default function RootLayout() {
           screenOptions={{
             headerShown: false,
             contentStyle: { backgroundColor: color.bg },
-            animation: 'fade_from_bottom',
-            gestureEnabled: true,
+            animation: isTV ? 'fade' : 'fade_from_bottom',
+            gestureEnabled: !isTV,
           }}
         >
           <Stack.Screen name="(tabs)" />

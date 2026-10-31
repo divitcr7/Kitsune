@@ -6,7 +6,7 @@ import { year } from '@/lib/format';
 import { art } from '@/lib/img';
 import { openShow } from '@/lib/nav';
 import { color, font, radius } from '@/theme/tokens';
-import { PressableScale } from './PressableScale';
+import { FocusRing, PressableScale } from './PressableScale';
 import { T } from './T';
 
 export function PosterArt({ show, width, rounded = radius.sm }: { show: Pick<Show, 'id' | 'poster'>; width: number; rounded?: number }) {
@@ -24,6 +24,7 @@ export function PosterArt({ show, width, rounded = radius.sm }: { show: Pick<Sho
         style={StyleSheet.absoluteFill}
       />
       <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.rim, { borderRadius: rounded }]} />
+      <FocusRing radius={rounded} />
     </View>
   );
 }
@@ -53,7 +54,8 @@ export function PosterCard({ show, width = 124, subtitle, bare }: { show: Show; 
 /** Top 10: a huge outlined numeral with the poster overlapping it. */
 export function RankCard({ show, rank, width = 118 }: { show: Show; rank: number; width?: number }) {
   const h = width * 1.5;
-  const numW = rank >= 10 ? 112 : 70;
+  // The numeral's room scales with the poster (the phone shelf is drawn at 118).
+  const numW = Math.round((rank >= 10 ? 112 : 70) * (width / 118));
   return (
     <PressableScale onPress={() => openShow(show)} style={{ width: numW + width - 22, height: h }} accessibilityLabel={`${rank}. ${show.name}`}>
       <Svg width={numW + 10} height={h} style={styles.rank}>

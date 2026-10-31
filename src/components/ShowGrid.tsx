@@ -2,16 +2,17 @@ import type { ReactElement } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, { type ScrollHandlerProcessed } from 'react-native-reanimated';
 import type { Show } from '@/lib/api';
+import { EDGE, isTV, tv } from '@/lib/tv';
 import { Appear } from './Appear';
 import { PosterCard } from './Poster';
 import { Skeleton } from './Skeleton';
 import { Spinner } from './Spinner';
 
-const COLS = 3;
-const GAP = 10;
-const SIDE = 20;
+const COLS = isTV ? 6 : 3;
+const GAP = isTV ? tv(16) : 10;
+const SIDE = EDGE;
 
-/** Three-column poster grid with infinite loading. */
+/** Poster grid (three columns, six on a TV) with infinite loading. */
 export function ShowGrid({
   data,
   loading,
@@ -68,8 +69,8 @@ export function ShowGrid({
           </View> : undefined}
       onEndReached={onEndReached}
       onEndReachedThreshold={0.6}
-      initialNumToRender={12}
-      maxToRenderPerBatch={12}
+      initialNumToRender={COLS * 4}
+      maxToRenderPerBatch={COLS * 4}
       windowSize={9}
       renderItem={({ item, index }) => (
         <Appear index={index < 18 ? index : 0}>
@@ -81,7 +82,7 @@ export function ShowGrid({
 }
 
 const styles = StyleSheet.create({
-  row: { gap: GAP, paddingHorizontal: SIDE, marginBottom: 18 },
+  row: { gap: GAP, paddingHorizontal: SIDE, marginBottom: isTV ? tv(20) : 18 },
   skeletons: { flexWrap: 'wrap', rowGap: 18 },
   more: { alignItems: 'center', marginVertical: 24 },
 });

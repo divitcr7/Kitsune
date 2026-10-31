@@ -2,16 +2,17 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { type ComponentRef, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, type StyleProp, StyleSheet, TextInput, TVFocusGuideView, View, type ViewStyle } from 'react-native';
 import Animated, { interpolate, interpolateColor, type SharedValue, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Appear } from '@/components/Appear';
 import { Icon } from '@/components/Icon';
 import { ShowGrid } from '@/components/ShowGrid';
 import { useTabScroll } from '@/components/TabBarContext';
-import { T } from '@/components/T';
+import { sized, T } from '@/components/T';
 import type { Show } from '@/lib/api';
 import { q } from '@/lib/queries';
+import { EDGE, isTV, tv, TV_NAV } from '@/lib/tv';
 import { useSignal } from '@/lib/ui';
 import { PressableScale } from '@/components/PressableScale';
 import { color, radius, TAB_BAR_HEIGHT } from '@/theme/tokens';
@@ -60,20 +61,23 @@ export default function Discover() {
 
   const header = (
     <View>
+      {isTV ? <SearchBar text={text} setText={setText} input={input} style={styles.tvSearch} /> : null}
       {!searching && mainGenres?.length ? (
         <Appear distance={10}>
           <T variant="title" style={styles.sectionLabel}>
             Browse Categories
           </T>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.genres}>
-            {chunk(mainGenres, 2).map((pair, i) => (
-              <View key={i} style={{ gap: 10 }}>
-                {pair.map((g, j) => (
-                  <Tile key={g.id} label={g.name} colors={TILES[(i * 2 + j) % TILES.length]} onPress={() => router.push({ pathname: '/genre/[id]', params: { id: g.id, name: g.name } })} />
-                ))}
-              </View>
-            ))}
-          </ScrollView>
+          <Shelf>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.genres}>
+              {chunk(mainGenres, 2).map((pair, i) => (
+                <View key={i} style={{ gap: 10 }}>
+                  {pair.map((g, j) => (
+                    <Tile key={g.id} label={g.name} colors={TILES[(i * 2 + j) % TILES.length]} onPress={() => router.push({ pathname: '/genre/[id]', params: { id: g.id, name: g.name } })} />
+                  ))}
+                </View>
+              ))}
+            </ScrollView>
+          </Shelf>
         </Appear>
       ) : null}
       <Appear key={searching ? 'r' : 'p'} distance={8}>
@@ -94,8 +98,8 @@ export default function Discover() {
         onEndReached={() => source.hasNextPage && !source.isFetchingNextPage && source.fetchNextPage()}
         header={header}
         onScroll={onScroll}
-        topPad={insets.top + HEADER}
-        bottomPad={TAB_BAR_HEIGHT + insets.bottom + 32}
+        topPad={isTV ? TV_NAV + tv(16) : insets.top + HEADER}
+        bottomPad={isTV ? tv(40) : TAB_BAR_HEIGHT + insets.bottom + 32}
         empty={
           searching ? (
             <View style={styles.empty}>
@@ -110,7 +114,7 @@ export default function Discover() {
           ) : null
         }
       />
-      <Header top={insets.top} text={text} setText={setText} input={input} scrollY={scrollY} />
+      {isTV ? null : <Header top={insets.top} text={text} setText={setText} input={input} scrollY={scrollY} />}
     </View>
   );
 }
@@ -126,14 +130,9 @@ function Header({
   top: number;
   text: string;
   setText: (s: string) => void;
-  input: React.RefObject<ComponentRef<typeof TextInput> | null>;
+  input: Input;
   scrollY: SharedValue<number>;
 }) {
-  const focus = useSharedValue(0);
-  const bar = useAnimatedStyle(() => ({
-    backgroundColor: interpolateColor(focus.value, [0, 1], [color.container2, color.container3]),
-    borderColor: interpolateColor(focus.value, [0, 1], ['rgba(255,255,255,0)', 'rgba(255,255,255,0.18)']),
-  }));
   const surface = useAnimatedStyle(() => ({ opacity: interpolate(scrollY.value, [0, 40], [0, 1], 'clamp') }));
   const title = useAnimatedStyle(() => ({
     opacity: interpolate(scrollY.value, [0, 50], [1, 0], 'clamp'),
@@ -148,31 +147,50 @@ function Header({
           Search
         </T>
       </Animated.View>
-      <Animated.View style={[styles.search, bar]}>
-        <Icon name="magnify" size={22} tint={color.textDim} />
-        <TextInput
-          ref={input}
-          value={text}
-          onChangeText={setText}
-          placeholder="Shows, movies, Japanese titles"
-          placeholderTextColor={color.textFaint}
-          selectionColor={color.accent}
-          cursorColor={color.accent}
-          returnKeyType="search"
-          autoCorrect={false}
-          autoCapitalize="none"
-          style={styles.input}
-          onFocus={() => focus.set(withTiming(1, { duration: 180 }))}
-          onBlur={() => focus.set(withTiming(0, { duration: 200 }))}
-        />
-        {text ? (
-          <Pressable hitSlop={10} onPress={() => setText('')} accessibilityLabel="Clear search">
-            <Icon name="close-circle" size={20} tint={color.textDim} />
-          </Pressable>
-        ) : null}
-      </Animated.View>
+      <SearchBar text={text} setText={setText} input={input} style={styles.phoneSearch} />
     </View>
   );
+}
+
+type Input = React.RefObject<ComponentRef<typeof TextInput> | null>;
+
+/** The search field; on a TV, OK on it opens the system keyboard. */
+function SearchBar({ text, setText, input, style }: { text: string; setText: (s: string) => void; input: Input; style?: StyleProp<ViewStyle> }) {
+  const focus = useSharedValue(0);
+  const bar = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(focus.value, [0, 1], [color.container2, color.container3]),
+    borderColor: interpolateColor(focus.value, [0, 1], ['rgba(255,255,255,0)', isTV ? color.text : 'rgba(255,255,255,0.18)']),
+  }));
+  return (
+    <Animated.View style={[styles.search, style, bar]}>
+      <Icon name="magnify" size={22} tint={color.textDim} />
+      <TextInput
+        ref={input}
+        value={text}
+        onChangeText={setText}
+        placeholder="Shows, movies, Japanese titles"
+        placeholderTextColor={color.textFaint}
+        selectionColor={color.accent}
+        cursorColor={color.accent}
+        returnKeyType="search"
+        autoCorrect={false}
+        autoCapitalize="none"
+        style={styles.input}
+        onFocus={() => focus.set(withTiming(1, { duration: 180 }))}
+        onBlur={() => focus.set(withTiming(0, { duration: 200 }))}
+      />
+      {text ? (
+        <Pressable hitSlop={10} onPress={() => setText('')} accessibilityLabel="Clear search">
+          <Icon name="close-circle" size={20} tint={color.textDim} />
+        </Pressable>
+      ) : null}
+    </Animated.View>
+  );
+}
+
+/** On a TV, coming back to the category shelf lands on the tile you left. */
+function Shelf({ children }: { children: React.ReactNode }) {
+  return isTV ? <TVFocusGuideView autoFocus>{children}</TVFocusGuideView> : <>{children}</>;
 }
 
 function Tile({ label, colors, onPress }: { label: string; colors: [string, string]; onPress: () => void }) {
@@ -198,8 +216,7 @@ const styles = StyleSheet.create({
   surface: { backgroundColor: color.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: color.line },
   title: { marginTop: 6, marginLeft: 4, height: 44 },
   search: {
-    marginTop: 10,
-    height: 48,
+    height: isTV ? tv(44) : 48,
     borderRadius: radius.md,
     borderWidth: 1,
     flexDirection: 'row',
@@ -207,11 +224,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     gap: 10,
   },
-  input: { flex: 1, color: color.text, fontSize: 16, paddingVertical: 0 },
-  sectionLabel: { paddingHorizontal: 20, marginTop: 10, marginBottom: 12 },
-  genres: { paddingHorizontal: 20, gap: 10 },
-  tile: { width: 156, height: 84, borderRadius: radius.md, overflow: 'hidden', justifyContent: 'flex-end', padding: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)' },
+  phoneSearch: { marginTop: 10 },
+  tvSearch: { marginHorizontal: EDGE, width: tv(520), marginBottom: tv(8) },
+  input: { flex: 1, color: color.text, fontSize: sized(16), paddingVertical: 0 },
+  sectionLabel: { paddingHorizontal: EDGE, marginTop: 10, marginBottom: 12 },
+  genres: { paddingHorizontal: EDGE, paddingVertical: isTV ? tv(8) : 0, gap: 10 },
+  tile: { width: isTV ? tv(150) : 156, height: isTV ? tv(76) : 84, borderRadius: radius.md, overflow: 'hidden', justifyContent: 'flex-end', padding: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.08)' },
   tileText: { fontWeight: '700' },
-  gridTitle: { paddingHorizontal: 20, marginTop: 30, marginBottom: 14 },
+  gridTitle: { paddingHorizontal: EDGE, marginTop: isTV ? tv(20) : 30, marginBottom: 14 },
   empty: { alignItems: 'center', marginTop: 60, paddingHorizontal: 40 },
 });

@@ -9,6 +9,7 @@ import { ShowGrid } from '@/components/ShowGrid';
 import { T } from '@/components/T';
 import { TopBar } from '@/components/TopBar';
 import { q } from '@/lib/queries';
+import { EDGE, isTV, tv } from '@/lib/tv';
 import { color } from '@/theme/tokens';
 
 export default function Genre() {
@@ -30,8 +31,8 @@ export default function Genre() {
         fetchingMore={shows.isFetchingNextPage}
         onEndReached={() => shows.hasNextPage && !shows.isFetchingNextPage && shows.fetchNextPage()}
         onScroll={onScroll}
-        topPad={insets.top + 64}
-        bottomPad={insets.bottom + 40}
+        topPad={isTV ? tv(36) : insets.top + 64}
+        bottomPad={isTV ? tv(40) : insets.bottom + 40}
         header={
           <View style={styles.head}>
             <T variant="hero">{name}</T>
@@ -43,12 +44,12 @@ export default function Genre() {
           </View>
         }
       />
-      <TopBar scrollY={scrollY} from={10} to={60} title={name} left={<IconButton icon="arrow-left" label="Back" onPress={() => router.back()} />} />
+      {isTV ? null : <TopBar scrollY={scrollY} from={10} to={60} title={name} left={<IconButton icon="arrow-left" label="Back" onPress={() => router.back()} />} />}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: color.bg },
-  head: { paddingHorizontal: 20, marginBottom: 20 },
+  head: { paddingHorizontal: EDGE, marginBottom: 20 },
 });

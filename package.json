@@ -1,6 +1,6 @@
 {
   "name": "kitsune",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
@@ -27,7 +27,7 @@
     "expo-system-ui": "~58.0.7",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "react-native": "0.88.1",
+    "react-native": "npm:react-native-tvos@0.88.0-0",
     "react-native-gesture-handler": "~3.3.0",
     "react-native-reanimated": "4.7.1",
     "react-native-safe-area-context": "~5.10.1",
@@ -38,17 +38,31 @@
     "zustand": "^5.0.16"
   },
   "devDependencies": {
+    "@react-native-tvos/config-tv": "^0.1.7",
     "@types/react": "~19.3.0",
+    "esbuild": "^0.28.2",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~58.0.4",
+    "preact": "^10.29.8",
     "typescript": "~6.0.3"
   },
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
-    "typecheck": "tsc --noEmit && node --no-warnings scripts/check-player-script.mjs",
+    "typecheck": "tsc --noEmit && tsc -p tv/tizen --noEmit && node --no-warnings scripts/check-player-script.mjs",
     "lint": "expo lint",
-    "build:apk": "bash scripts/build-apk.sh"
+    "build:apk": "bash scripts/build-apk.sh",
+    "build:tizen": "node tv/tizen/build.mjs"
   },
-  "private": true
+  "private": true,
+  "overrides": {
+    "react-native": "$react-native"
+  },
+  "expo": {
+    "install": {
+      "exclude": [
+        "react-native"
+      ]
+    }
+  }
 }

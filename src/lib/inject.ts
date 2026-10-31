@@ -95,8 +95,11 @@ const GUARD = `
  * 5. A Cloudflare "verify you're human" check is lifted above the player so it can be answered, and
  *    the site's own error messages (sign-in required, stream failed) are reported to the app.
  * Comment / related-show requests are answered locally so the page spends its time on video.
+ *
+ * With `tv`, the site's own controls are hidden and the app drives playback with a remote: it
+ * calls `window.__kitsuneCmd` (see tvCommandScript) and draws its own OSD from 'tick' messages.
  */
-export function playerScript(start: { id: string; t: number; preload: boolean }) {
+export function playerScript(start: { id: string; t: number; preload: boolean; tv?: boolean }) {
   return `(function () {
   if (window.__kitsune) return;
   window.__kitsune = 1;
@@ -141,6 +144,8 @@ ${GUARD}
     '[data-kitsune-verify]{position:fixed!important;left:50%!important;top:50%!important;right:auto!important;bottom:auto!important;margin:0!important;transform:translate(-50%,-50%)!important;z-index:2147483647!important;display:block!important;visibility:visible!important;opacity:1!important;padding:14px!important;border-radius:14px!important;background:#16161a!important;box-shadow:0 0 0 100vmax rgba(0,0,0,.72)!important}' +
     '[data-kitsune-ad]{display:none!important}' +
     '::-webkit-scrollbar{display:none}';
+  // On a TV the app draws the controls; the site's would only fight it for the remote.
+  if (START.tv) CSS += '[data-kitsune-root] .vjs-control-bar,[data-kitsune-root] .vjs-big-play-button{display:none!important}*{cursor:none!important}';
   var VIEWPORT = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no';
   function addStyle() {
     var vp = document.querySelector('meta[name="viewport"]');
@@ -281,6 +286,9 @@ ${GUARD}
       for (var p = box.parentElement; p && p !== document.documentElement; p = p.parentElement) {
         if (!p.hasAttribute('data-kitsune-anc')) p.setAttribute('data-kitsune-anc', '');
       }
+      // With a remote there's no pointer: put focus in the check so the D-pad and OK reach it.
+      var frame = START.tv && box.querySelector(CHALLENGE);
+      if (frame) { frame.setAttribute('tabindex', '0'); try { frame.focus(); } catch (x) {} }
     }
     if (!!box !== verifying) { verifying = !!box; post({ type: 'verify', on: verifying }); }
   }
@@ -300,6 +308,60 @@ ${GUARD}
   setInterval(liftChallenge, 700);
   setInterval(checkProblems, 2000);
 
+  /* TV: the app draws the controls from 'tick' and drives playback through __kitsuneCmd. */
+  function vjs() {
+    var v = hooked, el = v && v.closest ? v.closest('.video-js') : null;
+    return (v && v.player) || (el && el.player) || null;
+  }
+  function items(l) { var out = []; if (l) for (var i = 0; i < l.length; i++) out.push(l[i]); return out; }
+  function audioTracks() { var p = vjs(); return items(p && p.audioTracks ? p.audioTracks() : null); }
+  function subTracks() {
+    var p = vjs();
+    return items(p && p.textTracks ? p.textTracks() : hooked && hooked.textTracks).filter(function (t) { return t.kind === 'subtitles' || t.kind === 'captions'; });
+  }
+  function name(t) { return t ? t.label || t.language || 'On' : null; }
+  function sendTick() {
+    var v = hooked, e = current();
+    if (!START.tv || START.preload || !v) return;
+    var a = audioTracks(), s = subTracks();
+    var aOn = a.filter(function (t) { return t.enabled; })[0], sOn = s.filter(function (t) { return t.mode === 'showing'; })[0];
+    post({
+      type: 'tick', id: e && e.id, number: episodeNumber(), t: v.currentTime || 0, d: isFinite(v.duration) ? v.duration : 0,
+      paused: v.paused, buffering: !v.paused && v.readyState < 3,
+      audio: a.length > 1 ? name(aOn) : null, subs: s.length ? (sOn ? name(sOn) : 'Off') : null,
+      fill: !!root && root.hasAttribute('data-kitsune-fill')
+    });
+  }
+  window.__kitsuneCmd = function (cmd, arg) {
+    var v = hooked;
+    if (!v) return;
+    try {
+      if (cmd === 'toggle') cmd = v.paused ? 'play' : 'pause';
+      if (cmd === 'play') { var pr = v.play(); if (pr && pr.catch) pr.catch(function () {}); }
+      if (cmd === 'pause') { played = true; autoplayUntil = 0; v.pause(); }
+      if ((cmd === 'seek' || cmd === 'seekTo') && v.duration && isFinite(v.duration)) {
+        v.currentTime = Math.max(0, Math.min(v.duration - 1, cmd === 'seek' ? v.currentTime + arg : arg));
+      }
+      if (cmd === 'audio') {
+        var a = audioTracks(), ai = a.indexOf(a.filter(function (t) { return t.enabled; })[0]);
+        if (a.length > 1) a[(ai + 1) % a.length].enabled = true;
+      }
+      if (cmd === 'subs') {
+        // Off, then each subtitle track in turn, then off again.
+        var s = subTracks(), si = s.indexOf(s.filter(function (t) { return t.mode === 'showing'; })[0]);
+        for (var k = 0; k < s.length; k++) s[k].mode = 'disabled';
+        if (si + 1 < s.length) s[si + 1].mode = 'showing';
+      }
+      if (cmd === 'fill' && root) {
+        if (root.hasAttribute('data-kitsune-fill')) root.removeAttribute('data-kitsune-fill');
+        else root.setAttribute('data-kitsune-fill', '');
+      }
+    } catch (x) {}
+    sendTick();
+    setTimeout(sendTick, 300);
+  };
+  if (START.tv) setInterval(sendTick, 1000);
+
   var queued = false;
   function tick() {
     queued = false;
@@ -315,6 +377,8 @@ ${GUARD}
   afterMutation = schedule;
   document.addEventListener('DOMContentLoaded', schedule);
   window.addEventListener('load', schedule);
+  // Injected late (after load, on a page that has gone quiet), nothing above would fire again.
+  schedule();
 
   /* Episode changes happen client-side; watch the URL rather than wrapping history (the site wraps it too). */
   var lastPath = location.pathname;
@@ -401,3 +465,91 @@ export const flushScript = `(function(){var v=document.querySelector('video');if
 
 /** Pauses playback (used while the app asks the user to sign in). */
 export const pauseScript = `(function(){var v=document.querySelector('video');if(v)v.pause();})();true;`;
+
+export type TvCommand = 'toggle' | 'play' | 'pause' | 'seek' | 'seekTo' | 'audio' | 'subs' | 'fill';
+
+/** A remote-control command for a player page started with `tv` (seek/seekTo take seconds). */
+export const tvCommandScript = (cmd: TvCommand, arg = 0) => `window.__kitsuneCmd&&window.__kitsuneCmd(${JSON.stringify(cmd)},${Number(arg) || 0});true;`;
+
+/** JSON as a JS literal; U+2028/2029 are legal in JSON but end a string literal in older engines. */
+const literal = (v: unknown) => JSON.stringify(v).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+
+/**
+ * Signs in through anime.nexus's own login form with what was typed into the app's TV sign-in
+ * form (typing into a web page with a remote is miserable). Only ever runs on anime.nexus. Fills
+ * the fields the way React-controlled inputs expect, submits, then reports
+ * { type: 'login', state: 'submitted' | 'noform' | 'error', text? }. Success itself is reported by
+ * accountScript once the site answers as signed in.
+ */
+export function loginFillScript(email: string, password: string) {
+  return `(function () {
+  if (!/(^|\\.)anime\\.nexus$/i.test(location.hostname)) return;
+  var CRED = ${literal({ email, password })};
+  var USER = /mail|user|login|account/i;
+  var SUBMIT = /^(sign ?in|log ?in|login|continue|submit)$/i;
+  var ERROR = /invalid|incorrect|wrong|match|failed|too many|not found|try again|credentials|blocked|verify/i;
+  function post(m) { try { window.ReactNativeWebView.postMessage(JSON.stringify(m)); } catch (e) {} }
+  function shown(el) { return !!el && el.offsetWidth > 0 && el.offsetHeight > 0 && !el.disabled; }
+  function all(scope, sel) { return [].filter.call(scope.querySelectorAll(sel), shown); }
+  function text(el) { return (el.innerText || el.value || '').replace(/\\s+/g, ' ').trim(); }
+  function userField(scope) {
+    var inputs = all(scope, 'input');
+    var typed = inputs.filter(function (i) { return i.type === 'email' || /username|email/.test(i.autocomplete || ''); })[0];
+    return typed || inputs.filter(function (i) {
+      return (i.type === 'text' || !i.type) && USER.test((i.name || '') + ' ' + (i.id || '') + ' ' + (i.placeholder || ''));
+    })[0] || inputs.filter(function (i) { return i.type === 'text'; })[0];
+  }
+  function fill(el, value) {
+    var setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    el.focus();
+    setter.call(el, value);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    el.blur();
+  }
+  function errorText() {
+    var list = all(document, '[role=alert],[aria-live],[class*=error],[class*=Error],[class*=destructive],[class*=invalid],[data-sonner-toast]');
+    for (var i = 0; i < list.length; i++) {
+      var t = text(list[i]);
+      if (t && t.length < 220 && ERROR.test(t)) return t;
+    }
+    return '';
+  }
+  function submit(form, pass) {
+    var scope = form || document;
+    var btn = all(scope, 'button[type=submit],input[type=submit]')[0] ||
+      all(scope, 'button').filter(function (b) { return SUBMIT.test(text(b)); })[0];
+    if (btn) return btn.click();
+    if (form && form.requestSubmit) return form.requestSubmit();
+    if (form) return form.submit();
+    pass.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
+  }
+  function watch(before, path) {
+    var until = Date.now() + 12000;
+    (function check() {
+      if (location.pathname !== path) return;
+      var err = errorText();
+      if (err && err !== before) return post({ type: 'login', state: 'error', text: err });
+      if (Date.now() < until) setTimeout(check, 400);
+    })();
+  }
+  var tries = 0;
+  (function attempt() {
+    var pass = all(document, 'input[type=password]')[0];
+    var user = pass && userField(pass.form || document);
+    if (!pass || !user) {
+      if (++tries < 48) return setTimeout(attempt, 250);
+      return post({ type: 'login', state: 'noform' });
+    }
+    var before = errorText();
+    fill(user, CRED.email);
+    fill(pass, CRED.password);
+    setTimeout(function () {
+      submit(pass.form, pass);
+      post({ type: 'login', state: 'submitted' });
+      watch(before, location.pathname);
+    }, 150);
+  })();
+})();
+true;`;
+}

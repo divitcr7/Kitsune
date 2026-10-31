@@ -1,15 +1,15 @@
-import * as Haptics from 'expo-haptics';
 import { useTabTrigger } from 'expo-router/ui';
 import { useEffect } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
 import Animated, { interpolate, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { haptics } from '@/lib/haptics';
 import { color, TAB_BAR_HEIGHT } from '@/theme/tokens';
 import { Icon, type IconName } from './Icon';
 import { useTabBarHidden } from './TabBarContext';
 import { T } from './T';
 
-const TABS: { name: string; label: string; on: IconName; off: IconName }[] = [
+export const TABS: { name: string; label: string; on: IconName; off: IconName }[] = [
   { name: 'home', label: 'Home', on: 'home', off: 'home-outline' },
   { name: 'discover', label: 'Search', on: 'magnify', off: 'magnify' },
   { name: 'schedule', label: 'Schedule', on: 'calendar-blank', off: 'calendar-blank-outline' },
@@ -36,7 +36,7 @@ export function NavBar({ onReselect }: { onReselect?: (name: string) => void }) 
           focused={i === active}
           onPress={() => {
             if (i === active) return onReselect?.(tab.name);
-            Haptics.selectionAsync();
+            haptics.selection();
             switchTab(tab.name, {});
           }}
         />

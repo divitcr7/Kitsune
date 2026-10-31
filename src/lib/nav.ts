@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
-import * as Haptics from 'expo-haptics';
 import type { Show } from './api';
+import { haptics } from './haptics';
 import { imgUrl } from './img';
 import { type Session, usePlayer } from './player';
 import { queryClient, q } from './queries';
@@ -44,7 +44,7 @@ function session(show: Show | ShowLite, episode: EpisodeLite): Session {
 
 export function playEpisode(show: Show | ShowLite, episode: EpisodeLite) {
   useStore.getState().recordPlay(lite(show), episode);
-  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  haptics.impact();
   usePlayer.getState().open(session(show, episode));
 }
 
@@ -53,7 +53,8 @@ export function preloadEpisode(show: Show | ShowLite, episode: EpisodeLite) {
   usePlayer.getState().preload(session(show, episode));
 }
 
-async function findEpisode(showId: string, number: number) {
+/** Episode `number` of a show (episodes come 100 to a page). */
+export async function findEpisode(showId: string, number: number) {
   const page = await queryClient.fetchQuery(q.episodes(showId, Math.max(1, Math.ceil(number / 100)), 'asc'));
   return page.data.find((e) => e.number === number);
 }
