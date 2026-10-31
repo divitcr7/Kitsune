@@ -238,12 +238,16 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
           onMessage={onMessage}
           onLoadStart={(e) => {
             inject();
-            // A full page load to another episode: cover it with the loader until it plays.
+            // A full page load to another episode: cover it with the loader until it plays. (The
+            // same episode at another address, e.g. a redirect, keeps what we know about it.)
             const url = e.nativeEvent.url;
             if (url !== pageUrl.current && url.includes('/watch/')) {
               pageUrl.current = url;
-              setReady(false);
-              setEpisode({ number: '', title: '' });
+              const id = url.match(/\/watch\/([^/?#]+)/)?.[1];
+              if (id !== now.current.id) {
+                setReady(false);
+                setEpisode({ number: '', title: '' });
+              }
             }
           }}
           onLoadProgress={inject}

@@ -57,6 +57,17 @@
   <sub><b>The player:</b> just the video. Aoashi S2, episode 2, playing about a second after tapping Play (it preloaded while the show page was open).</sub>
 </p>
 
+<h3 align="center">On the big screen</h3>
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/screens/tv/androidtv-home.jpg" width="400" alt="Android TV / Google TV"><br><sub><b>Android TV / Google TV</b></sub></td>
+    <td align="center"><img src="docs/screens/tv/samsung-home.jpg" width="400" alt="Samsung TV (Tizen)"><br><sub><b>Samsung TV (Tizen)</b></sub></td>
+  </tr>
+</table>
+
+<p align="center"><sub>Same app, built for the remote. <a href="#android-tv-and-google-tv">Android TV</a> · <a href="#samsung-tv">Samsung TV</a></sub></p>
+
 ## Why Kitsune
 
 The site has the catalog. What it doesn't have is an app that respects your time: no popups, no fake download buttons, no new tabs opening themselves, no waiting around for the video. Kitsune puts a clean, cinematic UI on top of the anime.nexus catalog and plays episodes in the site's own player with all the junk stripped out.
@@ -98,6 +109,17 @@ Every release is signed with the same key, so updates install over the top and k
 
 The APK above is the TV app too: one download for phones and TVs. On a TV it opens Kitsune's 10-foot interface (a top menu, shelves you move through with the remote, the player's own on-screen controls) and shows up on the home screen with its banner.
 
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/screens/tv/androidtv-rails.jpg" width="400" alt="Shelves"><br><sub><b>Shelves</b></sub></td>
+    <td align="center"><img src="docs/screens/tv/androidtv-show.jpg" width="400" alt="Show page"><br><sub><b>Show page</b></sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screens/tv/androidtv-player.jpg" width="400" alt="Player controls"><br><sub><b>Player controls</b></sub></td>
+    <td align="center"><img src="docs/screens/tv/androidtv-search.jpg" width="400" alt="Search"><br><sub><b>Search</b></sub></td>
+  </tr>
+</table>
+
 1. On the TV, install **Downloader** (by AFTVnews) from the Play Store, or copy the APK over USB or `adb install`.
 2. Open `https://github.com/divitcr7/Kitsune/releases/latest` in Downloader, get `Kitsune-vX.Y.Z.apk`, and allow **Install unknown apps** for Downloader when the TV asks.
 3. Kitsune appears in your apps. Updates work like on the phone: the app offers new releases and opens the system installer.
@@ -114,6 +136,17 @@ The APK above is the TV app too: one download for phones and TVs. On a TV it ope
 ## Samsung TV
 
 Samsung TVs (Tizen) get Kitsune as a [TizenBrew](https://github.com/reisxd/TizenBrew) module. A normal Samsung app can't run Kitsune's guard script inside anime.nexus's own player, and Samsung's store doesn't take unofficial clients, so it goes through TizenBrew: install it once with Developer Mode, then add the module [`@divit7/kitsune-tizen`](https://www.npmjs.com/package/@divit7/kitsune-tizen). Same look, same remote controls, same ad-free player. Step-by-step install, supported TVs and troubleshooting: **[tv/tizen/README.md](tv/tizen/README.md)**.
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/screens/tv/samsung-rails.jpg" width="400" alt="Shelves"><br><sub><b>Shelves</b></sub></td>
+    <td align="center"><img src="docs/screens/tv/samsung-show.jpg" width="400" alt="Show page"><br><sub><b>Show page</b></sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screens/tv/samsung-player.jpg" width="400" alt="Player controls"><br><sub><b>Player controls</b></sub></td>
+    <td align="center"><img src="docs/screens/tv/samsung-mystuff.jpg" width="400" alt="My Stuff"><br><sub><b>My Stuff</b></sub></td>
+  </tr>
+</table>
 
 ## Troubleshooting
 
@@ -212,6 +245,7 @@ Kitsune stands on a lot of great work:
 - **[Material Design Icons](https://pictogrammers.com/library/mdi/)** by Pictogrammers (Apache 2.0), via `@expo/vector-icons`.
 - **[Inter](https://rsms.me/inter/)** by Rasmus Andersson and **[Unbounded](https://unbounded.polkadot.network)**, both under the [SIL Open Font License 1.1](assets/fonts/OFL.txt).
 - Screenshots feature **Aoashi Season 2**. *Aoashi* © Yūgo Kobayashi / Shogakukan and its licensors. Artwork appears only to show the app in use.
+- TV screenshots show titles from the anime.nexus catalog (*The Exiled Heavy Knight Knows How to Game the System*, *Frieren*, *Black Clover* and others); artwork belongs to its owners and appears only to show the app in use. The Android TV shots come from a Google TV emulator; the Samsung shots are the TV module rendering live catalog data at 1920×1080 in its test page. The player shots show the on-screen controls over an episode still.
 
 ## Disclaimer
 

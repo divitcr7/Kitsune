@@ -1,5 +1,7 @@
 # Kitsune for Samsung TV
 
+<p align="center"><img src="../../docs/screens/tv/samsung-home.jpg" width="820" alt="Kitsune on a Samsung TV"></p>
+
 Kitsune on Samsung Smart TVs (Tizen): the same cinematic, ad-free anime.nexus experience as the Android app, built for a TV remote. It's a [TizenBrew](https://github.com/reisxd/TizenBrew) module. Published on npm as [`@divit7/kitsune-tizen`](https://www.npmjs.com/package/@divit7/kitsune-tizen); the phone and Android TV app is the APK on [Kitsune's releases](https://github.com/divitcr7/Kitsune/releases/latest).
 
 > **Why TizenBrew?** Kitsune's whole trick is running a small guard script inside anime.nexus's own pages (so the site's player plays, minus the ads and popups). A regular Samsung TV app can't put a script into another site's page. TizenBrew can: it's an open-source TV app that opens a website and injects a module's script into it. Samsung's app store isn't an option for an unofficial client like this, so installing TizenBrew once (in Developer Mode) is the way in.
