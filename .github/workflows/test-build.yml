@@ -1,10 +1,10 @@
 name: Test build
 
-# Builds an APK from a branch and publishes it as a pre-release, so a change can be tried on a phone
-# or TV without a computer. The build is a separate app ("Kitsune Test": its own package name, signed
-# with the debug key), so it installs next to the released Kitsune and never replaces it or touches
-# its list and history. Installed apps only look at the latest full release, so they are never
-# offered a test build.
+# Builds an APK from a branch and publishes it as a release, so a change can be tried on a phone or
+# TV without a computer. The build is a separate app ("Kitsune Test": its own package name, signed
+# with the debug key, because the release key isn't available here), so it installs next to the
+# released Kitsune and never replaces it or touches its list and history. The release is not marked
+# as the latest one and its APK isn't named like a real one, so installed apps are never offered it.
 on:
   workflow_dispatch:
   push:
@@ -45,7 +45,7 @@ jobs:
           '
       - name: Build the APK
         run: npm run build:apk
-      - name: Publish as a pre-release
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -54,11 +54,11 @@ jobs:
           APK="Kitsune-Test-$VERSION-$SHA.apk"
           cp "dist/Kitsune-v$VERSION.apk" "$APK"
           cat > notes.md <<NOTES
-          A test build of Kitsune from \`$GITHUB_REF_NAME\` at $SHA, not a release.
+          A test build of Kitsune from \`$GITHUB_REF_NAME\` at $SHA.
 
           It installs as a separate app called **Kitsune Test**, next to the Kitsune you already have. Your list and history in Kitsune are not touched, and Kitsune Test starts empty and signed out. Uninstall it when you are done.
 
           Download \`$APK\` below on the phone or TV and open it to install.
           NOTES
-          gh release create "test-$SHA" "$APK" --prerelease --latest=false --target "$GITHUB_SHA" \
+          gh release create "test-$SHA" "$APK" --latest=false --target "$GITHUB_SHA" \
             --title "Kitsune Test $VERSION ($SHA)" --notes-file notes.md

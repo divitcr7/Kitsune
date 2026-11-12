@@ -129,9 +129,10 @@ CI (`.github/workflows/ci.yml`) runs typecheck, lint and the Tizen build. There 
 runner.
 
 `.github/workflows/test-build.yml` builds an APK on every push to a `claude/**` branch (or when run
-by hand) and publishes it as a pre-release. It is a separate app, "Kitsune Test"
-(`app.kitsune.anime.test`, debug-signed), so it installs next to the released Kitsune instead of
-replacing it. The in-app updater reads only the latest full release, so it never offers these.
+by hand) and publishes it as a release that is not marked latest. It is a separate app, "Kitsune
+Test" (`app.kitsune.anime.test`, debug-signed, since CI has no release key), so it installs next to
+the released Kitsune instead of replacing it. The in-app updater reads only the latest release and
+only an APK named `Kitsune-vX.Y.Z.apk`, so it never offers these.
 
 ## Testing a player change
 
