@@ -126,7 +126,12 @@ npm run build:apk     # needs JAVA_HOME and ANDROID_HOME; dist/Kitsune-v<version
 ```
 
 CI (`.github/workflows/ci.yml`) runs typecheck, lint and the Tizen build. There is no unit test
-runner and CI does not build the APK.
+runner.
+
+`.github/workflows/test-build.yml` builds an APK on every push to a `claude/**` branch (or when run
+by hand) and publishes it as a pre-release. It is a separate app, "Kitsune Test"
+(`app.kitsune.anime.test`, debug-signed), so it installs next to the released Kitsune instead of
+replacing it. The in-app updater reads only the latest full release, so it never offers these.
 
 ## Testing a player change
 
