@@ -154,7 +154,9 @@ Samsung TVs (Tizen) get Kitsune as a [TizenBrew](https://github.com/reisxd/Tizen
 
 **"This episode won't start right now".** anime.nexus refused the stream for a moment, usually a short rate limit. Wait a minute and tap **Try again**. Kitsune also pauses its background preloading for a while so it doesn't make things worse.
 
-**Episodes open in Chrome instead of in Kitsune, or "anime.nexus won't play inside apps right now".** anime.nexus sometimes refuses to open its player inside apps. When it does, Kitsune hands the episode to your browser, where it plays (with the site's own page and ads), and tries its own player again every few hours. On a TV there's no browser to hand off to, so Kitsune says so instead. Nothing to fix on your side.
+**A Cloudflare page ("Just a moment…" or "Verify you are human") before the episode.** anime.nexus has Cloudflare check connections now and then. The check runs inside Kitsune's player, untouched: most of the time it passes by itself after a few seconds, sometimes it needs a tap on the box (on a TV: OK on the remote). Then the episode plays in the app. Kitsune never opens your browser by itself.
+
+**"anime.nexus didn't open this episode".** anime.nexus answered with an error page instead of the episode. That's usually temporary: wait a moment and tap **Try again**. On a phone you can also choose **Open in browser** to watch it on the site.
 
 **A "Verify you are human" box over the video.** That's Cloudflare, on anime.nexus's behalf. Tap it and playback continues. On a TV, Kitsune puts the remote's focus on it: press OK (Back leaves the player).
 

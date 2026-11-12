@@ -35,6 +35,13 @@ if (/[\u2028\u2029]/.test(login)) {
   console.error('loginFillScript leaks a raw line separator into the script');
   process.exit(1);
 }
+// Every page script goes through the gate, which keeps Kitsune off Cloudflare's check page.
+for (const [name, source] of [['playerScript', script], ['playerScript (tv)', tv], ['accountScript', accountScript]]) {
+  if (!source.includes("type: 'gate'") || !source.includes('gate(function () {')) {
+    console.error(`${name} does not go through the gate`);
+    process.exit(1);
+  }
+}
 // Function declarations hoist, so a second `function tick()` in the same script silently
 // replaces the first. Keep every declared name unique.
 for (const [name, source] of [['playerScript', tv], ['accountScript', accountScript], ['loginFillScript', login]]) {

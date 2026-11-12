@@ -10,7 +10,6 @@ import { Icon } from '@/components/Icon';
 import { Spinner } from '@/components/Spinner';
 import { T } from '@/components/T';
 import { haptics, NotificationFeedbackType } from '@/lib/haptics';
-import { canOpenBrowser, openInBrowser } from '@/lib/browser';
 import { accountScript, loginFillScript } from '@/lib/inject';
 import { usePlayer } from '@/lib/player';
 import { useStore } from '@/lib/store';
@@ -121,14 +120,6 @@ function PhoneAccount() {
             setLoading(false);
           }}
           onShouldStartLoadWithRequest={allow}
-          onHttpError={async (e) => {
-            // anime.nexus turns away its pages inside apps: use its account page in the browser,
-            // where episodes play while that lasts.
-            if (e.nativeEvent.statusCode >= 400 && (await canOpenBrowser())) {
-              router.back();
-              openInBrowser(START);
-            }
-          }}
           setSupportMultipleWindows={false}
           javaScriptCanOpenWindowsAutomatically={false}
           thirdPartyCookiesEnabled
@@ -175,6 +166,8 @@ function TvAccount() {
   const [note, setNote] = useState('');
   const [page, setPage] = useState(false);
   const sawSignedOut = useRef(false);
+  // Kitsune put the web page up for Cloudflare's check (rather than the viewer asking for it).
+  const pageForCheck = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const inject = () => web.current?.injectJavaScript(accountScript);
 
@@ -217,10 +210,24 @@ function TvAccount() {
   }
 
   function onMessage(e: WebViewMessageEvent) {
-    let msg: { type: string; signedIn?: boolean; state?: string; text?: string };
+    let msg: { type: string; signedIn?: boolean; state?: string; text?: string; kind?: string; status?: number };
     try {
       msg = JSON.parse(e.nativeEvent.data);
     } catch {
+      return;
+    }
+    if (msg.type === 'gate') {
+      // Cloudflare's check: show the page so the remote can answer it, then step back once it's through.
+      if (msg.kind === 'check') {
+        if (!page) pageForCheck.current = true;
+        setPage(true);
+        setTimeout(() => web.current?.requestFocus(), 50);
+      }
+      if (msg.kind === 'none' && pageForCheck.current) {
+        pageForCheck.current = false;
+        setPage(false);
+      }
+      if (msg.kind === 'refused' && (msg.status ?? 0) < 500) fail('anime.nexus answered with an error instead of its sign-in page. Try again in a moment.');
       return;
     }
     if (msg.type === 'login') {
@@ -345,9 +352,6 @@ function TvAccount() {
               if (page) web.current?.requestFocus();
             }}
             onShouldStartLoadWithRequest={allow}
-            onHttpError={(e) => {
-              if (e.nativeEvent.statusCode >= 400) fail('anime.nexus won’t open its sign-in page inside apps right now. Kitsune tries again by itself; nothing to fix on this TV.');
-            }}
             setSupportMultipleWindows={false}
             javaScriptCanOpenWindowsAutomatically={false}
             thirdPartyCookiesEnabled
