@@ -18,6 +18,8 @@ const CHECK_EVERY = 6 * 60 * 60_000;
 const SAVED = 'kitsune-update';
 
 export const appVersion = Constants.expoConfig?.version ?? '0.0.0';
+// The Test build workflow renames the package to app.kitsune.anime.test, so it installs beside Kitsune.
+export const isTestBuild = (Constants.expoConfig?.android?.package ?? '').endsWith('.test');
 
 export type Release = {
   version: string;
