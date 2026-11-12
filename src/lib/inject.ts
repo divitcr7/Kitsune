@@ -145,6 +145,18 @@ const GUARD = `
 `;
 
 /**
+ * Stands in for GUARD in a test build's "without ad guard" retry: the same names the player body
+ * uses from GUARD, and nothing patched, so the page runs exactly as it would in a browser.
+ */
+const GUARD_OFF = `
+  var NAV_OK = /(^|\\.)(anime\\.nexus|anime\\.delivery|cloudflare\\.com)$/i;
+  function host(u) { try { return new URL(u, location.href).hostname; } catch (e) { return ''; } }
+  window.__kitsuneHeld = function () { return []; };
+  var afterMutation = function () {};
+  new MutationObserver(function () { afterMutation(); }).observe(document, { childList: true, subtree: true });
+`;
+
+/**
  * Runs inside anime.nexus/watch/* as the page starts loading (before the site injects its ads),
  * once GATE lets it (never on Cloudflare's check page, which the app shows untouched).
  *
@@ -158,8 +170,14 @@ const GUARD = `
  *
  * With `tv`, the site's own controls are hidden and the app drives playback with a remote: it
  * calls `window.__kitsuneCmd` (see tvCommandScript) and draws its own OSD from 'tick' messages.
+ *
+ * Requests that fail (and video errors) are recorded and sent with a 'problem' as `diag`, entries
+ * like "fetch 403 api.anime.nexus/api/anime/episode/stream cf-mitigated" (no query string).
+ *
+ * With `bare` (test builds only), the ad guard and every page change are left out: no patched
+ * prototypes or fetch/XHR, no styles, no pinning; only passive listening and the app messages.
  */
-export function playerScript(start: { id: string; t: number; preload: boolean; tv?: boolean }) {
+export function playerScript(start: { id: string; t: number; preload: boolean; tv?: boolean; bare?: boolean }) {
   return `(function () {
   if (window.__kitsune) return;
   window.__kitsune = 1;
@@ -167,19 +185,79 @@ export function playerScript(start: { id: string; t: number; preload: boolean; t
 ${GATE}
   // Everything else waits for the gate (and never runs on Cloudflare's check page).
   gate(function () {
-${GUARD}
+${start.bare ? GUARD_OFF : GUARD}
   var SKIP = /\\/api\\/anime\\/(auth\\/)?(episode\\/comments?|episode\\/comment\\/replies|details\\/related|recommendations)/;
   var AUTH_PATH = /^\\/(login|register|signup|forgot|reset)/;
   var CHALLENGE = 'iframe[src*="challenges.cloudflare.com"]';
 
+  /* What failed to load, sent with a 'problem' so the error screen can name the request that broke. */
+  var failedLoads = [], failedSeen = {};
+  function noteFailure(kind, url, status, extra) {
+    try {
+      var u = new URL(String(url || ''), location.href);
+      // No query string: it can carry tokens.
+      var where = u.hostname + u.pathname.slice(0, 48);
+      var key = status + ' ' + where;
+      if (failedSeen[key] || failedLoads.length >= 10) return;
+      failedSeen[key] = 1;
+      failedLoads.push(kind + ' ' + status + ' ' + where + (extra ? ' ' + extra : ''));
+    } catch (e) {}
+  }
+  window.__kitsuneFailed = function () { return failedLoads.slice(); };
+  // A side chain only: the page still gets the original promise, rejection included.
+  function watchFetch(p, url) {
+    if (!p || typeof p.then !== 'function') return;
+    p.then(function (r) {
+      if (!r || !(r.status >= 400)) return;
+      var cf = '';
+      try { cf = (r.headers && r.headers.get('cf-mitigated')) || ''; } catch (e) {}
+      noteFailure('fetch', url, r.status, cf);
+    }, function (err) {
+      // Aborts are the site cancelling its own requests (seeking, switching quality), not failures.
+      if (err && err.name === 'AbortError') return;
+      noteFailure('fetch', url, 0, String((err && err.message) || err || 'failed').slice(0, 40));
+    });
+  }
+
   var realFetch = window.fetch;
-  window.fetch = function (input) {
-    var url = typeof input === 'string' ? input : (input && input.url) || '';
-    if (SKIP.test(url)) {
-      return Promise.resolve(new Response('{"data":[],"meta":{"current_page":1,"last_page":1,"total":0}}', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  var realOpen = window.XMLHttpRequest && XMLHttpRequest.prototype.open;
+  if (!START.bare) {
+    window.fetch = function (input) {
+      var url = typeof input === 'string' ? input : (input && input.url) || '';
+      if (SKIP.test(url)) {
+        return Promise.resolve(new Response('{"data":[],"meta":{"current_page":1,"last_page":1,"total":0}}', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      }
+      var p = realFetch.apply(this, arguments);
+      watchFetch(p, url || String(input || ''));
+      return p;
+    };
+    if (realOpen) {
+      XMLHttpRequest.prototype.open = function (method, url) {
+        var xhr = this;
+        xhr.__kitsuneUrl = String(url);
+        xhr.__kitsuneAborted = 0;
+        if (!xhr.__kitsuneWatched) {
+          xhr.__kitsuneWatched = 1;
+          xhr.addEventListener('abort', function () { xhr.__kitsuneAborted = 1; });
+          xhr.addEventListener('loadend', function () {
+            if (xhr.__kitsuneAborted) return;
+            if (xhr.status >= 400 || xhr.status === 0) noteFailure('xhr', xhr.__kitsuneUrl, xhr.status);
+          });
+        }
+        return realOpen.apply(this, arguments);
+      };
     }
-    return realFetch.apply(this, arguments);
-  };
+  }
+  // Every resource the page loads (scripts, segments, images); this one patches nothing.
+  try {
+    new PerformanceObserver(function (list) {
+      var entries = list.getEntries();
+      for (var i = 0; i < entries.length; i++) {
+        var en = entries[i];
+        if (typeof en.responseStatus === 'number' && en.responseStatus >= 400) noteFailure(en.initiatorType || 'res', en.name, en.responseStatus);
+      }
+    }).observe({ type: 'resource', buffered: true });
+  } catch (e) {}
 
   /* 2. Links */
   function onClick(e) {
@@ -191,8 +269,10 @@ ${GUARD}
     if (AUTH_PATH.test(path)) { e.preventDefault(); e.stopImmediatePropagation(); post({ type: 'signin' }); return; }
     if (/^\\/series\\//.test(path) || path === '/') { e.preventDefault(); e.stopImmediatePropagation(); post({ type: 'close' }); }
   }
-  window.addEventListener('click', onClick, true);
-  window.addEventListener('auxclick', onClick, true);
+  if (!START.bare) {
+    window.addEventListener('click', onClick, true);
+    window.addEventListener('auxclick', onClick, true);
+  }
 
   /* 3. Player-only presentation */
   var CSS =
@@ -312,6 +392,13 @@ ${GUARD}
     });
     v.addEventListener('pause', function () { report(v, true); if (!played) setTimeout(kick, 300); });
     v.addEventListener('ended', function () { report(v, true); post({ type: 'ended' }); });
+    function videoFailed() {
+      var err = v.error;
+      noteFailure('video', v.currentSrc || location.href, err ? err.code : 0, err && err.message ? String(err.message).slice(0, 60) : '');
+    }
+    v.addEventListener('error', videoFailed);
+    // It may have failed before this script found it.
+    if (v.error) videoFailed();
     if (v.readyState >= 1) seek();
     if (v.readyState >= 3) ready();
   }
@@ -365,10 +452,18 @@ ${GUARD}
     var m = text.match(AUTH_TEXT), kind = 'auth';
     if (!m) { m = text.match(FAIL_TEXT); kind = 'stream'; }
     var found = m ? m[0] : '';
-    if (found && found !== lastProblem) post({ type: 'problem', kind: kind, text: found, blocked: window.__kitsuneHeld() });
+    if (found && found !== lastProblem) {
+      var diag = window.__kitsuneFailed();
+      post({ type: 'problem', kind: kind, text: found, blocked: window.__kitsuneHeld(), diag: diag });
+      // Requests can fail a moment after the message appears: send the fuller list once.
+      setTimeout(function () {
+        var later = window.__kitsuneFailed();
+        if (lastProblem === found && later.length > diag.length) post({ type: 'problem', kind: kind, text: found, blocked: window.__kitsuneHeld(), diag: later });
+      }, 1500);
+    }
     lastProblem = found;
   }
-  setInterval(liftChallenge, 700);
+  if (!START.bare) setInterval(liftChallenge, 700);
   setInterval(checkProblems, 2000);
 
   /* TV: the app draws the controls from 'tick' and drives playback through __kitsuneCmd. */
@@ -430,6 +525,8 @@ ${GUARD}
     queued = false;
     var v = document.querySelector('video');
     if (!v) return;
+    // Bare: the site's page as it is, only listening to its video.
+    if (START.bare) return hook(v);
     addStyle();
     pin(findRoot(v));
     hook(v);

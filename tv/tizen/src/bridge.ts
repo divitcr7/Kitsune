@@ -25,6 +25,8 @@ export type Msg = {
   fill?: boolean;
   /** Hosts the guard held back, sent with a 'problem'. */
   blocked?: string[];
+  /** What failed to load, sent with a 'problem' (the phone app shows it; this module doesn't). */
+  diag?: string[];
 };
 
 const listeners: ((m: Msg) => void)[] = [];

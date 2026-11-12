@@ -26,6 +26,7 @@ import { findEpisode, watchUrl } from '@/lib/nav';
 import { type Session, usePlayer } from '@/lib/player';
 import { resumePoint, useStore } from '@/lib/store';
 import { isTV, tv } from '@/lib/tv';
+import { isTestBuild } from '@/lib/updates';
 import { color, radius, spring } from '@/theme/tokens';
 import { Button, IconButton } from './Button';
 import { FocusBlock } from './FocusBlock';
@@ -58,7 +59,7 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
   const [attempt, setAttempt] = useState(0);
   const [episode, setEpisode] = useState({ number: String(session.number), title: session.title });
   const [toast, setToast] = useState<{ text: string; key: number } | null>(null);
-  const [problem, setProblem] = useState<{ kind: 'auth' | 'stream' | 'blocked'; text: string; blocked?: string[] } | null>(null);
+  const [problem, setProblem] = useState<{ kind: 'auth' | 'stream' | 'blocked'; text: string; blocked?: string[]; diag?: string[] } | null>(null);
   const [verifying, setVerifying] = useState(false);
   // Cloudflare's check page is what's loaded (in place of the episode), and whether it's on show.
   const [gate, setGate] = useState(false);
@@ -67,14 +68,16 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
   const checks = useRef(0);
   const [closing, setClosing] = useState(false);
   // What the page should load; a retry swaps in the episode now playing and where it got to.
-  const [target, setTarget] = useState({ id: session.episodeId, slug: session.slug, t: session.startAt });
+  // `bare` (test builds only): the site's page without Kitsune's ad guard, to see if the guard broke it.
+  const [target, setTarget] = useState({ id: session.episodeId, slug: session.slug, t: session.startAt, bare: false });
+  const bare = target.bare;
   // The episode on screen right now (the site can move on to the next one by itself).
   const now = useRef({ id: session.episodeId, slug: session.slug, number: session.number });
 
   const uri = `https://anime.nexus/watch/${target.id}/${target.slug}`;
   const pageUrl = useRef(uri);
   // Built per load: whether it starts as a preload is decided when it's created.
-  const script = useMemo(() => playerScript({ id: target.id, t: target.t, preload: !visible, tv: isTV }), [target]); // eslint-disable-line react-hooks/exhaustive-deps
+  const script = useMemo(() => playerScript({ id: target.id, t: target.t, preload: !visible, tv: isTV, bare: target.bare }), [target]); // eslint-disable-line react-hooks/exhaustive-deps
   // Android runs the "before content" script from onPageStarted, which can land before the new
   // document exists and be lost. The script is idempotent, so re-inject at every load milestone.
   const inject = () => web.current?.injectJavaScript(script);
@@ -138,8 +141,8 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
     show.set(withDelay(240, withTiming(0, { duration: 200 }, (done) => done && scheduleOnRN(close))));
   }
 
-  /** Reload the episode on screen, picking up where it got to. */
-  function retry() {
+  /** Reload the episode on screen, picking up where it got to (with `bare`, without the ad guard). */
+  function retry(opts?: { bare?: boolean }) {
     const cur = now.current;
     const t = Math.floor(resumePoint(useStore.getState().progress[cur.id]));
     pageUrl.current = `https://anime.nexus/watch/${cur.id}/${cur.slug}`;
@@ -150,7 +153,7 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
     setGateOpen(false);
     checks.current = 0;
     setReady(false);
-    setTarget({ id: cur.id, slug: cur.slug, t });
+    setTarget({ id: cur.id, slug: cur.slug, t, bare: !!opts?.bare });
     setAttempt((n) => n + 1);
   }
 
@@ -180,7 +183,7 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
     setGateOpen(false);
     checks.current = 0;
     setReady(false);
-    setTarget({ id: ep.id, slug: ep.slug, t: Math.floor(resumePoint(useStore.getState().progress[ep.id])) });
+    setTarget({ id: ep.id, slug: ep.slug, t: Math.floor(resumePoint(useStore.getState().progress[ep.id])), bare: false });
     setAttempt((n) => n + 1);
   }
 
@@ -202,7 +205,7 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
   }
 
   function onMessage(e: WebViewMessageEvent) {
-    let msg: { type: string; id?: string; slug?: string; number?: number; t?: number; d?: number; text?: string; kind?: string; on?: boolean; status?: number; blocked?: string[] } & Partial<Tick>;
+    let msg: { type: string; id?: string; slug?: string; number?: number; t?: number; d?: number; text?: string; kind?: string; on?: boolean; status?: number; blocked?: string[]; diag?: string[] } & Partial<Tick>;
     try {
       msg = JSON.parse(e.nativeEvent.data);
     } catch {
@@ -242,11 +245,17 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
     }
     if (msg.type === 'signin') signIn();
     if (msg.type === 'problem' && msg.text) {
+      const kind = msg.kind === 'auth' ? 'auth' : 'stream';
+      // The page sends the same problem again once more requests have failed: only the lists change.
+      if (problem && problem.kind === kind && problem.text === msg.text) {
+        setProblem({ ...problem, blocked: msg.blocked, diag: msg.diag });
+        return;
+      }
       // The site is refusing streams for now; stop preloading so we don't make it worse.
       usePlayer.getState().backOff();
-      if (msg.kind === 'auth') web.current?.injectJavaScript(pauseScript);
+      if (kind === 'auth') web.current?.injectJavaScript(pauseScript);
       haptics.notify(NotificationFeedbackType.Warning);
-      setProblem({ kind: msg.kind === 'auth' ? 'auth' : 'stream', text: msg.text, blocked: msg.blocked });
+      setProblem({ kind, text: msg.text, blocked: msg.blocked, diag: msg.diag });
     }
   }
 
@@ -332,7 +341,11 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
             }
           }}
           onLoadProgress={inject}
-          onLoadEnd={inject}
+          onLoadEnd={() => {
+            inject();
+            // Bare: nothing pins the site's player or waits for it, so show the page once it's in.
+            if (bare && !gate) setReady(true);
+          }}
           onShouldStartLoadWithRequest={allow}
           setSupportMultipleWindows
           onOpenWindow={() => {
@@ -383,7 +396,14 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
           <T variant="label">anime.nexus is checking your connection  ·  your episode starts right after</T>
         </View>
       ) : null}
-      {visible && problem ? <Problem kind={problem.kind} text={problem.text} blocked={problem.blocked} onRetry={retry} onSignIn={signIn} onBrowser={openBrowser} /> : null}
+      {isTestBuild && bare && visible && !problem && !gateOpen && !closing ? (
+        <View pointerEvents="none" style={styles.verifyHint}>
+          <T variant="label">Test: ad guard off</T>
+        </View>
+      ) : null}
+      {visible && problem ? (
+        <Problem kind={problem.kind} text={problem.text} blocked={problem.blocked} diag={problem.diag} onRetry={retry} onSignIn={signIn} onBrowser={openBrowser} />
+      ) : null}
       {toast && !problem ? <Toast key={toast.key} text={toast.text} onDone={() => setToast(null)} /> : null}
       {closing ? <View style={[StyleSheet.absoluteFill, styles.blackout]} /> : null}
       {/* A TV has a Back key; a focusable button here would only steal the remote. */}
@@ -415,7 +435,23 @@ function Toast({ text, onDone }: { text: string; onDone: () => void }) {
 }
 
 /** The site refused or paused the stream: say why in plain words and offer the way forward. */
-function Problem({ kind, text, blocked, onRetry, onSignIn, onBrowser }: { kind: 'auth' | 'stream' | 'blocked'; text: string; blocked?: string[]; onRetry: () => void; onSignIn: () => void; onBrowser: () => void }) {
+function Problem({
+  kind,
+  text,
+  blocked,
+  diag,
+  onRetry,
+  onSignIn,
+  onBrowser,
+}: {
+  kind: 'auth' | 'stream' | 'blocked';
+  text: string;
+  blocked?: string[];
+  diag?: string[];
+  onRetry: (opts?: { bare?: boolean }) => void;
+  onSignIn: () => void;
+  onBrowser: () => void;
+}) {
   const auth = kind === 'auth';
   if (kind === 'blocked') {
     return (
@@ -459,6 +495,8 @@ function Problem({ kind, text, blocked, onRetry, onSignIn, onBrowser }: { kind: 
         <View style={styles.problemActions}>
           <Button label={auth ? 'Sign in' : 'Try again'} icon={auth ? 'login' : 'refresh'} size="sm" hasTVPreferredFocus onPress={auth ? onSignIn : onRetry} />
           <Button label={auth ? 'Try again' : 'Sign in'} variant="secondary" size="sm" onPress={auth ? onRetry : onSignIn} />
+          {/* Test builds: the same episode with Kitsune's ad guard off, to see whether the guard is the cause. */}
+          {kind === 'stream' && isTestBuild && !isTV ? <Button label="Without ad guard" variant="secondary" size="sm" onPress={() => onRetry({ bare: true })} /> : null}
         </View>
         <T variant="caption" faint numberOfLines={2} style={styles.problemNote}>
           anime.nexus says: “{text}”
@@ -466,6 +504,11 @@ function Problem({ kind, text, blocked, onRetry, onSignIn, onBrowser }: { kind: 
         {blocked?.length ? (
           <T variant="caption" faint numberOfLines={2} style={{ marginTop: 4, textAlign: 'center' }}>
             Kitsune held back: {blocked.join(', ')}
+          </T>
+        ) : null}
+        {diag?.length ? (
+          <T variant="caption" faint numberOfLines={5} style={{ marginTop: 4, textAlign: 'center' }}>
+            Didn’t load: {diag.join('  ·  ')}
           </T>
         ) : null}
       </View>
