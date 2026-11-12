@@ -1,7 +1,64 @@
 /**
- * Shared by every anime.nexus page Kitsune opens: scripts and iframes may only come from the site,
- * its CDNs and Cloudflare (ad networks rotate throwaway domains, so this is an allowlist), and
- * window.open, document.write and alert/confirm/prompt do nothing.
+ * The player and account scripts start here. Cloudflare sometimes puts its own check ("Just a
+ * moment…", "Verify you are human") in front of anime.nexus, served with an error status. That page
+ * is Cloudflare's, so Kitsune leaves it entirely alone and only says it's there; once it passes,
+ * Cloudflare loads the real page and the script runs again there.
+ *
+ * gate(run) reads the document's HTTP status (Chromium 109+ reports it; older TV browsers don't,
+ * which counts as unknown) and posts { type: 'gate', kind, status }:
+ * - 'none': a normal page (or unknown); `run` goes right away, before the site's own scripts. With
+ *   an unknown status it still looks once the page is parsed and posts 'check' if it's Cloudflare's.
+ * - 'check': an error status on Cloudflare's check page; `run` never goes on this document.
+ * - 'refused': an error status on any other page, with `text` (the page's title and first words);
+ *   `run` goes once the page is parsed.
+ */
+const GATE = `
+  function post(m) { try { window.ReactNativeWebView.postMessage(JSON.stringify(m)); } catch (e) {} }
+  function pageStatus() {
+    try {
+      var nav = performance.getEntriesByType('navigation')[0];
+      var s = nav && nav.responseStatus;
+      return typeof s === 'number' && s > 0 ? s : 0;
+    } catch (e) { return 0; }
+  }
+  // Cloudflare's check page in any language. Not .cf-turnstile or a bare challenge-platform script:
+  // the site's own pages carry those (the player's Turnstile box, Cloudflare's jsd script).
+  function isCheckPage() {
+    if (typeof window._cf_chl_opt !== 'undefined') return true;
+    if (document.querySelector('#challenge-form,#challenge-stage,#challenge-running,script[src*="/cdn-cgi/challenge-platform/"][src*="orchestrate"]')) return true;
+    return /just a moment|checking your browser|verif(y|ying) you are human/i.test(document.title || '');
+  }
+  function whenParsed(fn) {
+    if (document.readyState !== 'loading') fn();
+    else document.addEventListener('DOMContentLoaded', fn);
+  }
+  function pageSummary() {
+    var title = (document.title || '').replace(/\\s+/g, ' ').trim();
+    var body = ((document.body && document.body.innerText) || '').replace(/\\s+/g, ' ').trim().slice(0, 140);
+    if (body.indexOf(title) === 0) return body;
+    return (title + ' ' + body).trim();
+  }
+  function gate(run) {
+    var status = pageStatus();
+    if (status < 400) {
+      post({ type: 'gate', kind: 'none', status: status });
+      if (!status) whenParsed(function () { if (isCheckPage()) post({ type: 'gate', kind: 'check', status: 0 }); });
+      run();
+      return;
+    }
+    whenParsed(function () {
+      if (isCheckPage()) return post({ type: 'gate', kind: 'check', status: status });
+      post({ type: 'gate', kind: 'refused', status: status, text: pageSummary() });
+      run();
+    });
+  }
+`;
+
+/**
+ * Shared by every anime.nexus page Kitsune opens (inside gate's `run`, after GATE, whose post() it
+ * uses): scripts and iframes may only come from the site, its CDNs and Cloudflare (ad networks
+ * rotate throwaway domains, so this is an allowlist), and window.open, document.write and
+ * alert/confirm/prompt do nothing.
  */
 const GUARD = `
   var CODE_OK = /(^|\\.)(anime\\.nexus|anime\\.delivery|cdn\\.nexus|challenges\\.cloudflare\\.com)$/i;
@@ -14,7 +71,6 @@ const GUARD = `
   window.__kitsuneHeld = function () { return Object.keys(held).slice(0, 6); };
   function codeOk(u) { if (!u) return true; var h = host(u); if (!h || CODE_OK.test(h)) return true; held[h] = 1; return false; }
   function bad(u) { var h = host(u); if (!h || !BLOCK.test(h)) return false; held[h] = 1; return true; }
-  function post(m) { try { window.ReactNativeWebView.postMessage(JSON.stringify(m)); } catch (e) {} }
 
   function guard(proto, attr, ok) {
     var d = proto && Object.getOwnPropertyDescriptor(proto, attr);
@@ -89,7 +145,8 @@ const GUARD = `
 `;
 
 /**
- * Runs inside anime.nexus/watch/* as the page starts loading (before the site injects its ads).
+ * Runs inside anime.nexus/watch/* as the page starts loading (before the site injects its ads),
+ * once GATE lets it (never on Cloudflare's check page, which the app shows untouched).
  *
  * 1. GUARD: only first-party code runs; popups, dialogs and document.write go nowhere.
  * 2. Off-site links do nothing, sign-in links open the app's account screen, show links close the player.
@@ -107,6 +164,9 @@ export function playerScript(start: { id: string; t: number; preload: boolean; t
   if (window.__kitsune) return;
   window.__kitsune = 1;
   var START = ${JSON.stringify(start)};
+${GATE}
+  // Everything else waits for the gate (and never runs on Cloudflare's check page).
+  gate(function () {
 ${GUARD}
   var SKIP = /\\/api\\/anime\\/(auth\\/)?(episode\\/comments?|episode\\/comment\\/replies|details\\/related|recommendations)/;
   var AUTH_PATH = /^\\/(login|register|signup|forgot|reset)/;
@@ -415,17 +475,20 @@ ${GUARD}
     if (ratio > 1.18 && !fill) { root.setAttribute('data-kitsune-fill', ''); pinch = 0; post({ type: 'toast', text: 'Zoomed to fill' }); }
     else if (ratio < 0.85 && fill) { root.removeAttribute('data-kitsune-fill'); pinch = 0; post({ type: 'toast', text: 'Original' }); }
   }, { capture: true, passive: true });
+  });
 })();
 true;`;
 }
 
 /**
- * Runs on anime.nexus account pages (sign in, settings): same ad guard as the player, and reports
- * whether the visitor is signed in. The site's API answers 401 to signed-out visitors.
+ * Runs on anime.nexus account pages (sign in, settings): same gate and ad guard as the player, and
+ * reports whether the visitor is signed in. The site's API answers 401 to signed-out visitors.
  */
 export const accountScript = `(function () {
   if (window.__kitsune) return;
   window.__kitsune = 1;
+${GATE}
+  gate(function () {
   // Match the app: use the site's dark theme unless the visitor picked one on the site.
   try {
     if (!localStorage.getItem('color-scheme')) localStorage.setItem('color-scheme', 'dark');
@@ -457,6 +520,7 @@ ${GUARD}
   }
   document.addEventListener('DOMContentLoaded', check);
   setInterval(check, 500);
+  });
 })();
 true;`;
 

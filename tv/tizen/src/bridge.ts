@@ -12,6 +12,8 @@ export type Msg = {
   d?: number;
   text?: string;
   kind?: string;
+  /** The page's HTTP status, sent with a 'gate' (0: the browser doesn't say). */
+  status?: number;
   on?: boolean;
   signedIn?: boolean;
   path?: string;

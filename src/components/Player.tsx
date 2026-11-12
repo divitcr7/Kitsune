@@ -6,7 +6,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BackHandler, StyleSheet, View } from 'react-native';
+import { BackHandler, Linking, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -22,10 +22,9 @@ import type { ShouldStartLoadRequest, WebViewHttpErrorEvent } from 'react-native
 import { queryClient } from '@/lib/queries';
 import { haptics, NotificationFeedbackType } from '@/lib/haptics';
 import { flushScript, pauseScript, playerScript, revealScript, tvCommandScript, type TvCommand } from '@/lib/inject';
-import { canOpenBrowser, openInBrowser } from '@/lib/browser';
 import { findEpisode, watchUrl } from '@/lib/nav';
 import { type Session, usePlayer } from '@/lib/player';
-import { BLOCKED_FOR, resumePoint, useStore } from '@/lib/store';
+import { resumePoint, useStore } from '@/lib/store';
 import { isTV, tv } from '@/lib/tv';
 import { color, radius, spring } from '@/theme/tokens';
 import { Button, IconButton } from './Button';
@@ -37,6 +36,10 @@ import { T } from './T';
 
 const ALLOWED = /(^|\.)(anime\.nexus|anime\.delivery|challenges\.cloudflare\.com)$/i;
 const READY_TIMEOUT = 15_000;
+// Most of Cloudflare's checks pass by themselves within a few seconds; only show one that doesn't.
+const GATE_GRACE = 3500;
+// A check that keeps coming back after it passes won't let the episode through.
+const MAX_CHECKS = 4;
 
 /** Renders the app's single player above everything; hidden while it preloads. */
 export function PlayerHost() {
@@ -57,6 +60,11 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
   const [toast, setToast] = useState<{ text: string; key: number } | null>(null);
   const [problem, setProblem] = useState<{ kind: 'auth' | 'stream' | 'blocked'; text: string; blocked?: string[] } | null>(null);
   const [verifying, setVerifying] = useState(false);
+  // Cloudflare's check page is what's loaded (in place of the episode), and whether it's on show.
+  const [gate, setGate] = useState(false);
+  const [gateOpen, setGateOpen] = useState(false);
+  // Check pages since the episode last played.
+  const checks = useRef(0);
   const [closing, setClosing] = useState(false);
   // What the page should load; a retry swaps in the episode now playing and where it got to.
   const [target, setTarget] = useState({ id: session.episodeId, slug: session.slug, t: session.startAt });
@@ -74,8 +82,6 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
   const show = useSharedValue(visible ? 1 : 0);
   // TV: the OSD reads the page's once-a-second 'tick' straight from here.
   const feedRef = useRef<((t: Tick) => void) | null>(null);
-  // Whether the loader's backdrop image has finished decoding (see refused()).
-  const thumbLoaded = useRef(!session.thumb);
 
   // Becoming visible: rotate, go immersive, and start playback if it was preloaded.
   useEffect(() => {
@@ -101,11 +107,27 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
   }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // If the page never reports a playable video, show it anyway so a captcha or error is visible.
+  // (Not while Cloudflare's check is up: that has its own way of being shown.)
   useEffect(() => {
-    if (ready || !visible) return;
+    if (ready || !visible || gate) return;
     const id = setTimeout(() => setReady(true), READY_TIMEOUT);
     return () => clearTimeout(id);
-  }, [ready, attempt, visible]);
+  }, [ready, attempt, visible, gate]);
+
+  // Cloudflare's check: keep the loader over it for a grace period, then show the page as it is.
+  useEffect(() => {
+    if (!gate || !visible) return;
+    const id = setTimeout(() => setGateOpen(true), GATE_GRACE);
+    return () => {
+      clearTimeout(id);
+      setGateOpen(false);
+    };
+  }, [gate, visible]);
+
+  // TV: hand the remote to the page so it can reach the check's box.
+  useEffect(() => {
+    if (isTV && gateOpen) web.current?.requestFocus();
+  }, [gateOpen]);
 
   function exit() {
     // Black out the page first: pausing makes the site flash its own overlays. Rotate back to
@@ -124,29 +146,17 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
     setProblem(null);
     setFailed(false);
     setVerifying(false);
+    setGate(false);
+    setGateOpen(false);
+    checks.current = 0;
     setReady(false);
     setTarget({ id: cur.id, slug: cur.slug, t });
     setAttempt((n) => n + 1);
   }
 
-  /**
-   * anime.nexus turned the page away (it refuses pages opened inside apps). Remember that, and hand
-   * the episode to the phone's browser, where it plays; a TV has no browser, so say what happened.
-   */
-  async function refused() {
-    usePlayer.getState().backOff();
-    useStore.getState().setBlockedUntil(Date.now() + BLOCKED_FOR);
-    if (!visible) return close();
-    const url = watchUrl(now.current);
-    if (await canOpenBrowser()) {
-      // Don't send the app to the background while the loader's image is still decoding: the
-      // image decoder (expo-image's AVIF plugin) can crash if it's torn down mid-frame.
-      for (let waited = 0; !thumbLoaded.current && waited < 2500; waited += 100) await new Promise((r) => setTimeout(r, 100));
-      await new Promise((r) => setTimeout(r, 400));
-      // Close the player only once the browser is really up (it opens over the app).
-      if (await openInBrowser(url)) return exit();
-    }
-    setProblem({ kind: 'blocked', text: '' });
+  /** Only ever on an explicit tap: the episode on anime.nexus in the phone's browser. */
+  function openBrowser() {
+    Linking.openURL(watchUrl(now.current)).catch(() => {});
   }
 
   /** Next / previous episode from the remote: load it in place, picking up where it was left. */
@@ -166,6 +176,9 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
     setProblem(null);
     setFailed(false);
     setVerifying(false);
+    setGate(false);
+    setGateOpen(false);
+    checks.current = 0;
     setReady(false);
     setTarget({ id: ep.id, slug: ep.slug, t: Math.floor(resumePoint(useStore.getState().progress[ep.id])) });
     setAttempt((n) => n + 1);
@@ -189,7 +202,7 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
   }
 
   function onMessage(e: WebViewMessageEvent) {
-    let msg: { type: string; id?: string; slug?: string; number?: number; t?: number; d?: number; text?: string; kind?: string; on?: boolean; blocked?: string[] } & Partial<Tick>;
+    let msg: { type: string; id?: string; slug?: string; number?: number; t?: number; d?: number; text?: string; kind?: string; on?: boolean; status?: number; blocked?: string[] } & Partial<Tick>;
     try {
       msg = JSON.parse(e.nativeEvent.data);
     } catch {
@@ -197,8 +210,12 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
     }
     if (msg.type === 'ready') {
       setReady(true);
-      // The in-app player works again: stop sending episodes to the browser.
-      if (useStore.getState().blockedUntil) useStore.getState().setBlockedUntil(0);
+      setGate(false);
+      checks.current = 0;
+    }
+    if (msg.type === 'gate') {
+      onGate(msg.kind, msg.status ?? 0, msg.text);
+      return;
     }
     if (msg.type === 'close') exit();
     if (msg.type === 'loading') {
@@ -233,6 +250,41 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
     }
   }
 
+  /**
+   * What the page script's gate saw (see inject.ts). Cloudflare's check page is left to itself:
+   * Kitsune only waits, shows it if it needs a tap, and plays the episode once it's through.
+   */
+  function onGate(kind: string | undefined, status: number, text?: string) {
+    if (kind === 'none') {
+      // Through the check: keep the loader over the real page until it plays.
+      if (gate) {
+        setGate(false);
+        setReady(false);
+      }
+    } else if (kind === 'check') {
+      checks.current += 1;
+      if (checks.current > MAX_CHECKS) {
+        setGate(false);
+        // No text: this one is Kitsune's own conclusion, not something the site said.
+        setProblem({ kind: 'blocked', text: '' });
+        return;
+      }
+      setFailed(false);
+      setReady(false);
+      setGate(true);
+    } else if (kind === 'refused' && status < 500) {
+      // (5xx is a server hiccup: onHttpError shows the retry screen for that.)
+      usePlayer.getState().backOff();
+      setGate(false);
+      if (!visible) {
+        close();
+        return;
+      }
+      haptics.notify(NotificationFeedbackType.Warning);
+      setProblem({ kind: 'blocked', text: text || `HTTP ${status}` });
+    }
+  }
+
   // Only top-level navigation is fenced in; ad iframes are already stopped inside the page.
   function allow(req: ShouldStartLoadRequest) {
     if (req.isTopFrame === false) return true;
@@ -243,6 +295,8 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
     }
   }
 
+  // The site's in-player verify box, or Cloudflare's check page: the page has the screen to itself.
+  const checking = verifying || gateOpen;
   const layer = useAnimatedStyle(() => ({ opacity: show.value, transform: [{ scale: 1.04 - show.value * 0.04 }] }));
 
   return (
@@ -253,7 +307,7 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
           <NavigationBar hidden />
         </>
       ) : null}
-      <FocusBlock enabled={verifying} style={styles.web}>
+      <FocusBlock enabled={checking} style={styles.web}>
         <WebView<object>
           key={attempt}
           ref={web}
@@ -296,10 +350,9 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
           androidLayerType="hardware"
           webviewDebuggingEnabled={__DEV__}
           onError={() => setFailed(true)}
+          // A 4xx is often Cloudflare's check (served as 403); the page script's gate sorts that out.
           onHttpError={(e: WebViewHttpErrorEvent) => {
-            const { statusCode, url } = e.nativeEvent;
-            if (statusCode >= 500) setFailed(true);
-            else if (statusCode >= 400 && url.includes('/watch/')) refused();
+            if (e.nativeEvent.statusCode >= 500) setFailed(true);
           }}
           onRenderProcessGone={() => {
             setReady(false);
@@ -307,18 +360,10 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
           }}
         />
       </FocusBlock>
-      {visible && (!ready || failed) && !verifying && !problem ? (
-        <Loader
-          name={session.showName}
-          number={episode.number}
-          title={episode.title}
-          thumb={session.thumb}
-          failed={failed}
-          onRetry={retry}
-          onThumbLoad={() => (thumbLoaded.current = true)}
-        />
+      {visible && (!ready || failed) && !checking && !problem ? (
+        <Loader name={session.showName} number={episode.number} title={episode.title} thumb={session.thumb} failed={failed} onRetry={retry} />
       ) : null}
-      {isTV && visible && ready && !failed && !problem && !verifying && !closing ? (
+      {isTV && visible && ready && !failed && !problem && !checking && !closing ? (
         <PlayerOsd
           title={session.showName}
           episode={episode.number ? `Episode ${episode.number}` : 'Now playing'}
@@ -328,16 +373,21 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
           onExit={exit}
         />
       ) : null}
-      {isTV && visible && verifying && !problem ? (
+      {isTV && visible && checking && !problem ? (
         <View pointerEvents="none" style={styles.verifyHint}>
           <T variant="label">Use the remote to tick the box  ·  Back to leave</T>
         </View>
       ) : null}
-      {visible && problem ? <Problem kind={problem.kind} text={problem.text} blocked={problem.blocked} onRetry={retry} onSignIn={signIn} /> : null}
+      {!isTV && visible && gateOpen && !problem ? (
+        <View pointerEvents="none" style={styles.verifyHint}>
+          <T variant="label">anime.nexus is checking your connection  ·  your episode starts right after</T>
+        </View>
+      ) : null}
+      {visible && problem ? <Problem kind={problem.kind} text={problem.text} blocked={problem.blocked} onRetry={retry} onSignIn={signIn} onBrowser={openBrowser} /> : null}
       {toast && !problem ? <Toast key={toast.key} text={toast.text} onDone={() => setToast(null)} /> : null}
       {closing ? <View style={[StyleSheet.absoluteFill, styles.blackout]} /> : null}
       {/* A TV has a Back key; a focusable button here would only steal the remote. */}
-      {!isTV && visible && !closing && (!ready || failed || verifying || problem) ? (
+      {!isTV && visible && !closing && (!ready || failed || checking || problem) ? (
         <View style={styles.back}>
           <IconButton icon="arrow-left" label="Close player" variant="scrim" onPress={exit} />
         </View>
@@ -365,22 +415,31 @@ function Toast({ text, onDone }: { text: string; onDone: () => void }) {
 }
 
 /** The site refused or paused the stream: say why in plain words and offer the way forward. */
-function Problem({ kind, text, blocked, onRetry, onSignIn }: { kind: 'auth' | 'stream' | 'blocked'; text: string; blocked?: string[]; onRetry: () => void; onSignIn: () => void }) {
+function Problem({ kind, text, blocked, onRetry, onSignIn, onBrowser }: { kind: 'auth' | 'stream' | 'blocked'; text: string; blocked?: string[]; onRetry: () => void; onSignIn: () => void; onBrowser: () => void }) {
   const auth = kind === 'auth';
   if (kind === 'blocked') {
     return (
       <View style={[StyleSheet.absoluteFill, styles.loader]}>
         <View style={styles.problem}>
-          <Icon name="television-off" size={36} tint={color.accent} />
+          <Icon name="alert-circle-outline" size={36} tint={color.accent} />
           <T variant="title" style={styles.cardTitle}>
-            anime.nexus won’t play inside apps right now
+            anime.nexus didn’t open this episode
           </T>
           <T dim style={styles.problemBody}>
-            anime.nexus is turning away its player when it’s opened inside an app, so Kitsune can’t play it here. On a phone, Kitsune hands episodes to the browser instead; this TV has no browser to hand them to. Kitsune tries its own player again by itself every few hours.
+            {text
+              ? 'anime.nexus answered with an error instead of the episode. That’s usually temporary, so give it a moment and try again.'
+              : 'anime.nexus’s security check kept coming back instead of letting the episode through. Give it a moment and try again.'}
           </T>
           <View style={styles.problemActions}>
             <Button label="Try again" icon="refresh" size="sm" hasTVPreferredFocus onPress={onRetry} />
+            {/* The only way into a browser, and only on a tap (a TV has none). */}
+            {isTV ? null : <Button label="Open in browser" variant="secondary" size="sm" onPress={onBrowser} />}
           </View>
+          {text ? (
+            <T variant="caption" faint numberOfLines={2} style={styles.problemNote}>
+              anime.nexus says: “{text}”
+            </T>
+          ) : null}
         </View>
       </View>
     );
@@ -414,12 +473,10 @@ function Problem({ kind, text, blocked, onRetry, onSignIn }: { kind: 'auth' | 's
   );
 }
 
-function Loader({ name, number, title, thumb, failed, onRetry, onThumbLoad }: { name: string; number: string; title: string; thumb?: string; failed: boolean; onRetry: () => void; onThumbLoad?: () => void }) {
+function Loader({ name, number, title, thumb, failed, onRetry }: { name: string; number: string; title: string; thumb?: string; failed: boolean; onRetry: () => void }) {
   return (
     <View style={[StyleSheet.absoluteFill, styles.loader]}>
-      {thumb ? (
-        <Image source={{ uri: thumb }} blurRadius={18} contentFit="cover" onLoad={onThumbLoad} onError={onThumbLoad} style={[StyleSheet.absoluteFill, { opacity: 0.45 }]} />
-      ) : null}
+      {thumb ? <Image source={{ uri: thumb }} blurRadius={18} contentFit="cover" style={[StyleSheet.absoluteFill, { opacity: 0.45 }]} /> : null}
       <LinearGradient colors={['rgba(0,0,0,0.45)', 'rgba(0,0,0,0.94)']} style={StyleSheet.absoluteFill} />
       <View style={styles.card}>
         {failed ? null : <Spinner size={44} />}
