@@ -50,3 +50,6 @@ example
 
 # Built APKs
 dist/
+
+# Gradle output of local Expo modules
+modules/*/android/build/

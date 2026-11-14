@@ -2,7 +2,7 @@
   "expo": {
     "name": "Kitsune",
     "slug": "kitsune",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "kitsune",
@@ -10,7 +10,7 @@
     "backgroundColor": "#000000",
     "android": {
       "package": "app.kitsune.anime",
-      "versionCode": 6,
+      "versionCode": 7,
       "adaptiveIcon": {
         "backgroundColor": "#07060B",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -88,7 +88,8 @@
               "armeabi-v7a"
             ],
             "enableMinifyInReleaseBuilds": true,
-            "enableShrinkResourcesInReleaseBuilds": true
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "extraProguardRules": "# WorkManager (expo-background-task) and Room create these by reflection; R8 must keep them.\n-keep class * extends androidx.room.RoomDatabase { <init>(...); }\n-keep class androidx.work.impl.** { *; }\n-keep class androidx.work.** { *; }\n-keep class androidx.room.** { *; }"
           }
         }
       ],
