@@ -14,8 +14,8 @@ const HIDE_AFTER = 3500;
 
 /**
  * The phone player's controls, drawn by the app over the native video: tap to show or hide; play,
- * ±10 s, a seek bar you can drag, next episode, sub/dub and subtitles. Fed by the same once-a-second
- * ticks as the TV's OSD.
+ * ±10 s, a seek bar you can drag, next episode, sub/dub, subtitles and the settings panel. Fed by
+ * the same ticks as the TV's OSD.
  */
 export function PhoneControls({
   title,
@@ -24,6 +24,7 @@ export function PhoneControls({
   onCommand,
   onJump,
   onExit,
+  onSettings,
 }: {
   title: string;
   episode: string;
@@ -31,6 +32,7 @@ export function PhoneControls({
   onCommand: (cmd: TvCommand, arg?: number) => void;
   onJump: (step: 1 | -1) => void;
   onExit: () => void;
+  onSettings: () => void;
 }) {
   const [tick, setTick] = useState<Tick | null>(null);
   const [shown, setShown] = useState(true);
@@ -140,6 +142,7 @@ export function PhoneControls({
           {tick?.audio ? <Chip icon="translate" text={tick.audio} onPress={() => (onCommand('audio'), poke())} /> : null}
           {tick?.subs ? <Chip icon="subtitles-outline" text={tick.subs} onPress={() => (onCommand('subs'), poke())} /> : null}
           <Round icon={tick?.fill ? 'fit-to-screen-outline' : 'fullscreen'} label={tick?.fill ? 'Fit screen' : 'Fill screen'} onPress={() => (onCommand('fill'), poke())} />
+          <Round icon="cog-outline" label="Settings" onPress={onSettings} />
         </View>
 
         <View pointerEvents="box-none" style={styles.middle}>

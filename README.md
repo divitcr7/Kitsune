@@ -82,6 +82,8 @@ No accounts. No analytics. No trackers. Your list and history stay on your phone
 | ⚡ **Quick play** | While you read a show's page, the up-next episode's streams are looked up in the background, so Play starts fast |
 | 🛡️ **Zero ads** | Episodes play in Kitsune's own native player from miruro.cx's streams. No web page, so no ads, popups or redirects |
 | ⏭️ **Skip intro** | Skip the opening or ending with one tap (Up on a TV remote), sub or dub, and subtitles in your language |
+| ⚙️ **Player settings** | Quality (Auto or locked to 1080p, 720p…), audio language, sub or dub, captions, caption size and background, playback speed |
+| ⬇️ **Downloads** | Save single episodes or whole seasons (sub or dub, your quality) and watch them with no connection. My Stuff → Downloads |
 | ⏯️ **Pick up anywhere** | Progress saved per episode, Continue Watching on Home and My Stuff, auto-resume, next episode follows along |
 | 📺 **Player-only view** | Just the video, full screen, landscape, immersive, screen stays awake. Pinch to fill the screen |
 | 🔎 **Search & categories** | Live search across English and Japanese titles, browse by genre, popular this week |
@@ -159,6 +161,14 @@ Samsung TVs (Tizen) get Kitsune as a [TizenBrew](https://github.com/reisxd/Tizen
 **"No working stream for this episode".** Kitsune tried every stream miruro.cx offered and none started. That's usually temporary: wait a minute and tap **Try again**. If the other language has streams, **Play the dub** / **Play subbed** is right there.
 
 **"miruro.cx didn't let Kitsune through".** Cloudflare's check kept coming back. Give it a moment and tap **Try again**.
+
+**"Couldn't load the … subtitles".** None of the places the subtitle file can come from answered. Pick another language under Settings → Captions, or try again later.
+
+**Downloads stop when I leave the app.** Downloads run inside Kitsune, and Android pauses apps in the background after a while. Open Kitsune again and they carry on from the last saved piece; nothing is downloaded twice. Keep Kitsune open (the screen stays on while downloading) for a whole season.
+
+**A download says "Not enough free space" or "This stream can't be saved".** Free some space and tap it to try again. A stream miruro.cx serves encrypted can't be saved; streaming it still works.
+
+**No volume boost or Anime4K upscaling.** Those need native code the video player doesn't expose, so Kitsune doesn't show options that wouldn't work.
 
 **"Couldn't reach miruro.cx" or "miruro.cx answered with an error".** A connection problem or a hiccup on the site. Check your connection and tap **Try again**.
 

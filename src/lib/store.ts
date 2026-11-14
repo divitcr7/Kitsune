@@ -9,7 +9,39 @@ export type Progress = { t: number; d: number; at: number };
 export type HistoryEntry = { show: ShowLite; episode: EpisodeLite; at: number };
 /** Which miruro.cx show an anime.nexus show plays from (see lib/miruro/match.ts). */
 export type ShowLink = { anilist: number; miruro: string };
-export type Prefs = { audio: 'sub' | 'dub'; subs: boolean };
+export type CaptionSize = 's' | 'm' | 'l' | 'xl';
+export type Prefs = {
+  audio: 'sub' | 'dub';
+  subs: boolean;
+  /** 'auto', or the most lines to play (1080, 720, …). */
+  quality: 'auto' | number;
+  speed: number;
+  /** Preferred audio language for streams that carry several ('ja', 'en', …). */
+  audioLang: string | null;
+  subLang: string | null;
+  captionSize: CaptionSize;
+  captionBg: boolean;
+  /** What a new download is saved as. */
+  download: { audio: 'sub' | 'dub'; height: 'best' | number };
+};
+
+export const DEFAULT_PREFS: Prefs = {
+  audio: 'sub',
+  subs: true,
+  quality: 'auto',
+  speed: 1,
+  audioLang: null,
+  subLang: null,
+  captionSize: 'm',
+  captionBg: false,
+  download: { audio: 'sub', height: 1080 },
+};
+
+/** Stored prefs over the defaults, so a field added later never comes back undefined. */
+export function migratePrefs(stored: unknown): Prefs {
+  const p = stored && typeof stored === 'object' ? (stored as Partial<Prefs>) : {};
+  return { ...DEFAULT_PREFS, ...p, download: { ...DEFAULT_PREFS.download, ...(p.download ?? {}) } };
+}
 
 type State = {
   myList: ShowLite[];
@@ -96,20 +128,27 @@ export const useStore = create<State>()(
         set({ links });
       },
 
-      prefs: { audio: 'sub', subs: true },
+      prefs: DEFAULT_PREFS,
       setPrefs: (p) => set({ prefs: { ...get().prefs, ...p } }),
     }),
     {
       name: 'kitsune-store',
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (s) => ({ myList: s.myList, history: s.history, progress: s.progress, signedIn: s.signedIn, links: s.links, prefs: s.prefs }),
       // Version 1 kept `blockedUntil` (episodes went to the browser while it lasted); drop it.
+      // Version 3 grew `prefs`: fill in what an older one lacks.
       migrate: (stored) => {
-        if (!stored || typeof stored !== 'object' || !('blockedUntil' in stored)) return stored as State;
+        if (!stored || typeof stored !== 'object') return stored as State;
         const rest: Record<string, unknown> = { ...stored };
         delete rest.blockedUntil;
+        rest.prefs = migratePrefs(rest.prefs);
         return rest as State;
+      },
+      // The default merge is shallow: a stored `prefs` would replace the defaults wholesale.
+      merge: (stored, current) => {
+        const s = (stored ?? {}) as Partial<State>;
+        return { ...current, ...s, prefs: migratePrefs(s.prefs) };
       },
     },
   ),

@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { iconFont } from '@/components/Icon';
+import { DownloadsHost } from '@/components/DownloadsHost';
 import { Intro } from '@/components/Intro';
 import { MiruroBridge } from '@/components/MiruroBridge';
 import { PlayerHost } from '@/components/Player';
@@ -61,10 +62,12 @@ export default function RootLayout() {
           <Stack.Screen name="show/[id]" />
           <Stack.Screen name="genre/[id]" />
           <Stack.Screen name="account" options={{ animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="downloads" />
         </Stack>
         <UpdateSheet />
         <PlayerHost />
         <MiruroBridge />
+        <DownloadsHost />
         <Intro ready={restored && fonts} />
       </PersistQueryClientProvider>
     </GestureHandlerRootView>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { BackHandler, StyleSheet, View } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
 import { bridgeScript } from '@/lib/inject';
@@ -13,6 +13,7 @@ import {
   bridgeResponse,
   useBridge,
 } from '@/lib/miruro/bridge';
+import { useDownloads } from '@/lib/downloads/store';
 import { usePlayer } from '@/lib/player';
 import { isTV, tv } from '@/lib/tv';
 import { radius } from '@/theme/tokens';
@@ -42,10 +43,13 @@ function Tab() {
   const web = useRef<WebView<object>>(null);
   const reload = useBridge((s) => s.reload);
   const state = useBridge((s) => s.state);
-  // Only the player waits on the API with someone watching; a check is never shown over browsing.
+  // Only the player, or a download just tapped, waits on the API with someone watching; a check is
+  // never shown over browsing.
   const playing = usePlayer((s) => !!s.session);
+  const asking = useDownloads((s) => !!s.asking);
+  const waiting = playing || asking;
   const [grace, setGrace] = useState(false);
-  const shown = grace && state === 'check' && playing;
+  const shown = grace && state === 'check' && waiting;
   const checks = useRef(0);
   const inject = () => web.current?.injectJavaScript(bridgeScript);
 
@@ -63,17 +67,27 @@ function Tab() {
 
   // Keep a check out of sight for a grace period; most pass on their own.
   useEffect(() => {
-    if (state !== 'check' || !playing) return;
+    if (state !== 'check' || !waiting) return;
     const id = setTimeout(() => setGrace(true), GATE_GRACE);
     return () => {
       clearTimeout(id);
       setGrace(false);
     };
-  }, [state, playing]);
+  }, [state, waiting]);
 
   useEffect(() => {
     if (isTV && shown) web.current?.requestFocus();
   }, [shown]);
+
+  // Shown for a download (no player underneath): Back puts it away until the person asks again.
+  useEffect(() => {
+    if (!shown || playing) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      useDownloads.getState().setAsking(null);
+      return true;
+    });
+    return () => sub.remove();
+  }, [shown, playing]);
 
   function onMessage(e: WebViewMessageEvent) {
     let msg: { type: string; kind?: string; status?: number; text?: string; id?: string; ctype?: string; b64?: string };
@@ -141,7 +155,7 @@ function Tab() {
       </FocusBlock>
       {shown ? (
         <View pointerEvents="none" style={styles.hint}>
-          <T variant="label">{isTV ? 'Use the remote to tick the box  ·  Back to leave' : 'miruro.cx is checking your connection  ·  your episode starts right after'}</T>
+          <T variant="label">{isTV ? 'Use the remote to tick the box  ·  Back to leave' : playing ? 'miruro.cx is checking your connection  ·  your episode starts right after' : 'miruro.cx is checking your connection  ·  your download starts right after'}</T>
         </View>
       ) : null}
     </View>

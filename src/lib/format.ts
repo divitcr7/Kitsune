@@ -47,3 +47,11 @@ export function timeAgo(ms: number) {
   if (s < 86400 * 7) return `${Math.floor(s / 86400)}d ago`;
   return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
+
+/** 1.4 GB, 380 MB, 12 KB. */
+export function formatBytes(n: number) {
+  if (!n || n < 0) return '0 MB';
+  if (n >= 1e9) return `${(n / 1e9).toFixed(n >= 10e9 ? 0 : 1)} GB`;
+  if (n >= 1e6) return `${Math.round(n / 1e6)} MB`;
+  return `${Math.max(1, Math.round(n / 1e3))} KB`;
+}

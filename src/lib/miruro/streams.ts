@@ -1,13 +1,15 @@
 import type { MiruroConfig, PlayInfo, PlaySubtitle } from './api';
-import { type ProxyEnv, proxyUrl } from './codec';
+import { type ProxyEnv, proxyUrl, refererOf } from './codec';
 
 /**
- * Every way to play one episode, best first. Pure, so `scripts/check-miruro.mjs` can test it.
+ * Every way to play one episode, best first. Pure (apart from `probe`), so
+ * `scripts/check-miruro.mjs` can test it.
  *
- * Providers come in miruro's own order (/api/config `providerOrder`, visible ones only). For a
- * provider the site plays through its proxy, the proxy URL comes first: the proxy fetches the stream
- * with the headers the API lists and rewrites the playlist, so the player sends nothing special.
- * Then the stream itself, with exactly the headers the API says that server needs.
+ * Providers come in miruro's own order (/api/config `providerOrder`, visible ones only). A provider
+ * the site plays through its proxy gets the proxy URL first: the proxy fetches the stream with the
+ * server's Referer and rewrites the playlist, so the player sends nothing special. Then the stream
+ * itself, with exactly the headers the API lists. A provider the site plays directly (`proxy:
+ * false`) gets the direct stream first and the proxy as a fallback.
  */
 
 export type Audio = 'sub' | 'dub';
@@ -19,7 +21,12 @@ export type Candidate = {
   provider: string;
   server: string;
   track: string;
-  via: 'proxy' | 'direct';
+  via: 'proxy' | 'direct' | 'local';
+  /** The upstream master playlist, and the Referer the proxy should send for it. */
+  streamUrl: string;
+  referer: string | null;
+  /** Whether the site sends this provider through its proxy (decides where subtitles come from). */
+  proxied: boolean;
   subtitles: PlaySubtitle[];
 };
 
@@ -39,20 +46,21 @@ export function candidates(play: PlayInfo, config: MiruroConfig | null, env: Pro
   for (const provider of order) {
     const cfg = config?.streaming[provider];
     if (cfg && cfg.visible === false) continue;
-    // An unknown provider is tried both ways; `proxy: false` means the site plays it directly.
-    const useProxy = cfg ? cfg.proxy !== false : true;
+    // An unknown provider is treated as proxied, which is how the site handles most of them.
+    const proxied = cfg ? cfg.proxy !== false : true;
     for (const track of tracksFor(audio, cfg?.variantOrder)) {
       const entry = play.tracks.find((t) => t.track === track)?.providers.find((p) => p.provider === provider);
       if (!entry) continue;
       for (const server of entry.servers) {
         const stream = server.streams.find((s) => s.format === 'hls' && /^https:\/\//.test(s.url));
         if (!stream) continue;
-        const base = { provider, server: server.server, track, subtitles: track === 'ssub' ? (entry.subtitles ?? []) : [] };
         const headers = server.headers && Object.keys(server.headers).length ? server.headers : undefined;
-        if (useProxy) {
-          out.push({ ...base, key: `${provider}/${server.server}/${track}/proxy`, via: 'proxy', uri: proxyUrl(env.a, env.key, stream.url, headers ?? null, '/pl.m3u8') });
-        }
-        out.push({ ...base, key: `${provider}/${server.server}/${track}/direct`, via: 'direct', uri: stream.url, headers });
+        const referer = refererOf(headers);
+        const base = { provider, server: server.server, track, streamUrl: stream.url, referer, proxied, subtitles: track === 'ssub' ? (entry.subtitles ?? []) : [] };
+        const viaProxy: Candidate = { ...base, key: `${provider}/${server.server}/${track}/proxy`, via: 'proxy', uri: proxyUrl(env.a, env.key, stream.url, referer, '/pl.m3u8') };
+        const direct: Candidate = { ...base, key: `${provider}/${server.server}/${track}/direct`, via: 'direct', uri: stream.url, headers };
+        if (proxied) out.push(viaProxy, direct);
+        else out.push(direct, viaProxy);
       }
     }
   }
@@ -69,31 +77,51 @@ export function hasAudio(play: PlayInfo, audio: Audio) {
   return play.tracks.some((t) => want.includes(t.track) && t.providers.some((p) => p.servers.some((s) => s.streams.length)));
 }
 
-/** Subtitle files the player can draw (forced-only tracks hold just signs and songs). */
+/**
+ * Subtitle files the player can draw. The API's `format` isn't trusted (icarus labels ASS files
+ * "vtt"); the content decides (lib/subtitles.ts). Forced-only tracks hold just signs and songs.
+ */
 export function usableSubtitles(list: PlaySubtitle[]) {
-  return list.filter((s) => (s.format === 'vtt' || s.format === 'srt') && !/forced/i.test(s.label) && /^https:\/\//.test(s.file));
+  return list.filter((s) => !/forced/i.test(s.label) && /^https:\/\//.test(s.file));
 }
 
-/** The subtitle file to show first: the one marked default, else English, else the first. */
-export function defaultSubtitle(list: PlaySubtitle[]) {
+/** The subtitle file to show first: the language asked for, else the one marked default, else English, else the first. */
+export function defaultSubtitle(list: PlaySubtitle[], preferLang?: string | null) {
   const usable = usableSubtitles(list);
-  return usable.find((s) => s.default) ?? usable.find((s) => /^en/i.test(s.language)) ?? usable[0];
+  const lang = preferLang?.toLowerCase();
+  return (
+    (lang ? usable.find((s) => s.language.toLowerCase() === lang) ?? usable.find((s) => s.language.toLowerCase().startsWith(lang.slice(0, 2))) : undefined) ??
+    usable.find((s) => s.default) ??
+    usable.find((s) => /^en/i.test(s.language)) ??
+    usable[0]
+  );
 }
 
 /**
- * Whether a master playlist answers at all. A quick look before handing a URL to the player, which
- * otherwise takes far longer to give up on a dead server.
+ * Where to fetch a subtitle file from, in order. The site fetches them through its proxy for
+ * proxied providers and directly otherwise; icarus's host only answers with the listed headers.
  */
-export async function probe(c: Candidate, timeout = 4000): Promise<boolean> {
+export function subtitleSources(sub: PlaySubtitle, c: Pick<Candidate, 'proxied' | 'headers' | 'referer'>, env: ProxyEnv | null): { uri: string; headers?: Record<string, string> }[] {
+  const direct = { uri: sub.file, headers: c.headers };
+  const proxied = env ? { uri: proxyUrl(env.a, env.key, sub.file, c.referer, '/sub.vtt') } : null;
+  if (!proxied) return [direct];
+  return c.proxied ? [proxied, direct] : [direct, proxied];
+}
+
+/**
+ * The master playlist's text if it answers at all, else null. A quick look before handing a URL to
+ * the player, which otherwise takes far longer to give up on a dead server.
+ */
+export async function probe(c: Candidate, timeout = 4000): Promise<string | null> {
   const ctrl = new AbortController();
   const id = setTimeout(() => ctrl.abort(), timeout);
   try {
     const res = await fetch(c.uri, { headers: c.headers, signal: ctrl.signal });
-    if (!res.ok) return false;
+    if (!res.ok) return null;
     const text = await res.text();
-    return text.trimStart().startsWith('#EXTM3U');
+    return text.trimStart().startsWith('#EXTM3U') ? text : null;
   } catch {
-    return false;
+    return null;
   } finally {
     clearTimeout(id);
   }

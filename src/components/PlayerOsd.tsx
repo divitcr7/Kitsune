@@ -21,7 +21,8 @@ const SCRUB_EVERY = 220;
 /**
  * The TV player's controls, drawn by the app over the video: a focus sink that holds the remote,
  * the remote's keys, and an OSD (title, progress, time) that shows on any key and fades while
- * playing. Down opens a row: next episode, audio, subtitles, fill. Up skips an opening or ending.
+ * playing. Down opens a row: next episode, audio, subtitles, fill, settings. Up skips an opening or
+ * ending.
  */
 export function PlayerOsd({
   title,
@@ -32,9 +33,14 @@ export function PlayerOsd({
   onExit,
   skip,
   onSkip,
+  onSettings,
+  blocked,
 }: {
   title: string;
   episode: string;
+  onSettings: () => void;
+  /** Another panel (settings) has the remote: no focus sink, keys ignored. */
+  blocked?: boolean;
   /** Shown while the opening or ending is on: Up skips it. */
   skip?: string | null;
   onSkip?: () => void;
@@ -144,6 +150,7 @@ export function PlayerOsd({
 
   // Android TV sends JS each key as it's released, plus long* events when a key is held down.
   useTVEventHandler((e) => {
+    if (blocked) return;
     const up = Number(e.eventKeyAction) === 1;
     const type = e.eventType;
     if (/^long(Left|Right|Rewind|FastForward)$/.test(type)) {
@@ -210,7 +217,7 @@ export function PlayerOsd({
   return (
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
       {/* Holds the remote's focus while the row is closed, so the web page never gets it. */}
-      {menu ? null : <View focusable hasTVPreferredFocus style={StyleSheet.absoluteFill} />}
+      {menu || blocked ? null : <View focusable hasTVPreferredFocus style={StyleSheet.absoluteFill} />}
 
       {nudge ? <Nudge key={nudge.key} text={nudge.text} icon={nudge.icon} onDone={() => setNudge(null)} /> : null}
 
@@ -257,6 +264,16 @@ export function PlayerOsd({
             {tick?.audio ? <Button label={`Audio: ${tick.audio}`} icon="translate" size="sm" variant="secondary" onPress={() => onCommand('audio')} /> : null}
             {tick?.subs ? <Button label={`Subtitles: ${tick.subs}`} icon="subtitles-outline" size="sm" variant="secondary" onPress={() => onCommand('subs')} /> : null}
             <Button label={tick?.fill ? 'Fit screen' : 'Fill screen'} icon={tick?.fill ? 'fit-to-screen-outline' : 'fullscreen'} size="sm" variant="secondary" onPress={() => onCommand('fill')} />
+            <Button
+              label="Settings"
+              icon="cog-outline"
+              size="sm"
+              variant="secondary"
+              onPress={() => {
+                closeMenu();
+                onSettings();
+              }}
+            />
           </TVFocusGuideView>
         ) : null}
       </Animated.View>

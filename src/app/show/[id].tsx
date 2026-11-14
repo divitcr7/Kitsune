@@ -8,6 +8,8 @@ import Animated, { Extrapolation, interpolate, type SharedValue, useAnimatedScro
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Appear } from '@/components/Appear';
 import { Action, Button, Chip, IconButton } from '@/components/Button';
+import { DownloadButton } from '@/components/DownloadButton';
+import { DownloadSheet } from '@/components/DownloadSheet';
 import { ProgressBar } from '@/components/EpisodeCard';
 import { Icon } from '@/components/Icon';
 import { Skeleton } from '@/components/Skeleton';
@@ -126,6 +128,7 @@ function Body({ show, stats }: { show: Show; stats?: Stats }) {
   const [expanded, setExpanded] = useState(false);
   const [order, setOrder] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(1);
+  const [sheet, setSheet] = useState(false);
   const episodes = useQuery(q.episodes(show.id, page, order));
   const entry = useStore((st) => st.history[show.id]);
   // Only the progress of the episode we might resume, not the whole map (avoids re-rendering on every tick).
@@ -194,6 +197,7 @@ function Body({ show, stats }: { show: Show; stats?: Stats }) {
 
         <View style={[styles.actions, isTV && tvs.actions]}>
           <Action icon={inList ? 'check' : 'plus'} label="My List" active={inList} onPress={() => toggle(show)} />
+          {total ? <Action icon="download-multiple" label="Download" onPress={() => setSheet(true)} /> : null}
           {isTV ? null : <Action icon="share-variant-outline" label="Share" onPress={() => Share.share({ message: `${show.name}\n${webUrl(`/series/${show.id}/${show.slug}`)}` })} />}
           <Action
             icon={order === 'asc' ? 'sort-numeric-ascending' : 'sort-numeric-descending'}
@@ -254,6 +258,7 @@ function Body({ show, stats }: { show: Show; stats?: Stats }) {
       </View>
 
       <Info show={show} stats={stats} />
+      {sheet ? <DownloadSheet show={show} total={total} onClose={() => setSheet(false)} /> : null}
     </Appear>
   );
 }
@@ -316,28 +321,32 @@ function EpisodeRow({ show, ep, current }: { show: Show; ep: Episode; current: b
   const p = useStore((st) => st.progress[ep.id]);
   const thumb = art(ep.image, 'episode', '640x360');
   const tags = [ep.is_filler ? 'Filler' : null, ep.is_recap ? 'Recap' : null].filter(Boolean);
+  // The download button sits beside the row, not inside it, so a remote can focus each.
   return (
-    <Pressable onPress={() => playEpisode(show, ep)} style={({ pressed, focused }) => [styles.row, pressed && { opacity: 0.6 }, focused && tvs.rowFocus]}>
-      <View style={styles.rowThumb}>
-        <Image source={thumb.source} placeholder={thumb.placeholder} placeholderContentFit="cover" contentFit="cover" transition={200} recyclingKey={ep.id} style={StyleSheet.absoluteFill} />
-        <View style={styles.rowPlay}>
-          <Icon name="play" size={18} tint="#fff" />
+    <View style={styles.rowWrap}>
+      <Pressable onPress={() => playEpisode(show, ep)} style={({ pressed, focused }) => [styles.row, styles.rowMain, pressed && { opacity: 0.6 }, focused && tvs.rowFocus]}>
+        <View style={styles.rowThumb}>
+          <Image source={thumb.source} placeholder={thumb.placeholder} placeholderContentFit="cover" contentFit="cover" transition={200} recyclingKey={ep.id} style={StyleSheet.absoluteFill} />
+          <View style={styles.rowPlay}>
+            <Icon name="play" size={18} tint="#fff" />
+          </View>
+          <ProgressBar value={fraction(p)} onDark style={styles.rowBar} />
         </View>
-        <ProgressBar value={fraction(p)} onDark style={styles.rowBar} />
-      </View>
-      <View style={styles.rowText}>
-        <T variant="micro" color={current ? color.accent : color.textFaint}>
-          {current ? 'Up next  ·  ' : ''}Episode {ep.number}
-          {tags.length ? `  ·  ${tags.join(' · ')}` : ''}
-        </T>
-        <T variant="heading" numberOfLines={2} style={{ marginTop: 3 }}>
-          {ep.title || `Episode ${ep.number}`}
-        </T>
-        <T variant="caption" faint style={{ marginTop: 3 }}>
-          {minutes(ep.duration)}
-        </T>
-      </View>
-    </Pressable>
+        <View style={styles.rowText}>
+          <T variant="micro" color={current ? color.accent : color.textFaint}>
+            {current ? 'Up next  ·  ' : ''}Episode {ep.number}
+            {tags.length ? `  ·  ${tags.join(' · ')}` : ''}
+          </T>
+          <T variant="heading" numberOfLines={2} style={{ marginTop: 3 }}>
+            {ep.title || `Episode ${ep.number}`}
+          </T>
+          <T variant="caption" faint style={{ marginTop: 3 }}>
+            {minutes(ep.duration)}
+          </T>
+        </View>
+      </Pressable>
+      <DownloadButton show={show} episode={ep} />
+    </View>
   );
 }
 
@@ -371,6 +380,8 @@ const styles = StyleSheet.create({
   epHead: { flexDirection: 'row', alignItems: 'baseline', gap: 8, paddingHorizontal: EDGE, marginTop: 30, marginBottom: 10 },
   episodes: { paddingHorizontal: EDGE, marginTop: 8 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 },
+  rowWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  rowMain: { flex: 1 },
   rowThumb: { width: isTV ? tv(160) : 142, height: isTV ? tv(90) : 80, borderRadius: radius.sm, overflow: 'hidden', backgroundColor: color.container2 },
   rowPlay: { position: 'absolute', left: 6, bottom: 6, width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
   rowBar: { position: 'absolute', left: 0, right: 0, bottom: 0 },

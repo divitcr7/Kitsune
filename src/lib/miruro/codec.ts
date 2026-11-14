@@ -74,14 +74,21 @@ export function encodeCatalog(gzipped: Uint8Array): Uint8Array {
 
 export type ProxyEnv = { a: string; b: string; key: string };
 
+/** A server's `Referer` header, whatever its case. */
+export function refererOf(headers?: Record<string, string> | null): string | null {
+  if (!headers) return null;
+  for (const [k, v] of Object.entries(headers)) if (k.toLowerCase() === 'referer' && v) return v;
+  return null;
+}
+
 /**
- * A URL on miruro's own stream proxy, which fetches `url` with `headers` and rewrites the playlist
- * so every line points back at the proxy. The player then needs no headers of its own.
+ * A URL on miruro's own stream proxy, which fetches `url` with `referer` and rewrites the playlist
+ * so every line points back at the proxy. The player then needs no headers of its own. The site
+ * sends the Referer value alone (not a JSON object of headers), and the proxy expects exactly that.
  */
-export function proxyUrl(base: string, keyHex: string, url: string, headers: Record<string, string> | null, tail: '/pl.m3u8' | '/sub.vtt') {
+export function proxyUrl(base: string, keyHex: string, url: string, referer: string | null, tail: '/pl.m3u8' | '/sub.vtt') {
   const key = hexBytes(keyHex);
   const enc = (s: string) => toBase64Url(xor(strToU8(s), key));
   const root = base.endsWith('/') ? base : `${base}/`;
-  const h = headers && Object.keys(headers).length ? `~${enc(JSON.stringify(headers))}` : '';
-  return `${root}${enc(url)}${h}${tail}`;
+  return `${root}${enc(url)}${referer ? `~${enc(referer)}` : ''}${tail}`;
 }

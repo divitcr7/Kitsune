@@ -15,8 +15,9 @@ import { PosterCard } from '@/components/Poster';
 import { useTabScroll } from '@/components/TabBarContext';
 import { TopBar } from '@/components/TopBar';
 import { T } from '@/components/T';
+import { useDownloadLive, useDownloads } from '@/lib/downloads/store';
 import type { Show } from '@/lib/api';
-import { minutes, timeAgo } from '@/lib/format';
+import { formatBytes, minutes, timeAgo } from '@/lib/format';
 import { art } from '@/lib/img';
 import { openShow, playEpisode } from '@/lib/nav';
 import { fraction, type HistoryEntry, useStore } from '@/lib/store';
@@ -122,6 +123,9 @@ export default function Library() {
           <Empty icon="history" text="Everything you watch shows up here, so you can jump right back in." />
         )}
 
+        <Header title="Downloads" />
+        <DownloadsRow />
+
         <Header title="Account" />
         <AccountRow />
 
@@ -226,6 +230,35 @@ function Empty({ icon, text }: { icon: 'history' | 'plus'; text: string }) {
       </T>
       <Button label="Browse" variant="secondary" size="sm" onPress={() => switchTab('discover', {})} />
     </View>
+  );
+}
+
+function DownloadsRow() {
+  const items = useDownloads((s) => s.items);
+  const live = useDownloadLive((s) => (s.id && s.total ? s.done / s.total : null));
+  const all = Object.values(items);
+  const saved = all.filter((d) => d.status === 'done');
+  const waiting = all.filter((d) => d.status !== 'done' && d.status !== 'failed').length;
+  const failed = all.filter((d) => d.status === 'failed').length;
+  const bytes = all.reduce((n, d) => n + (d.bytes || 0), 0);
+  const line = [
+    saved.length ? `${saved.length} saved  ·  ${formatBytes(bytes)}` : 'Watch without a connection',
+    waiting ? `${waiting} downloading${live !== null ? ` (${Math.floor(live * 100)}%)` : ''}` : null,
+    failed ? `${failed} need${failed === 1 ? 's' : ''} a retry` : null,
+  ]
+    .filter(Boolean)
+    .join('  ·  ');
+  return (
+    <Pressable onPress={() => router.push('/downloads')} style={({ pressed, focused }) => [styles.pad, styles.account, pressed && { opacity: 0.6 }, focused && styles.accountFocus]}>
+      <Icon name="download-circle-outline" size={30} tint={color.text} />
+      <View style={{ flex: 1 }}>
+        <T variant="heading">Downloads</T>
+        <T variant="caption" faint style={{ marginTop: 2 }}>
+          {line}
+        </T>
+      </View>
+      <Icon name="chevron-right" tint={color.textFaint} />
+    </Pressable>
   );
 }
 

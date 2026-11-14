@@ -1,33 +1,40 @@
 import { useEventListener } from 'expo';
+import { File, Paths } from 'expo-file-system';
 import { Image } from 'expo-image';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { LinearGradient } from 'expo-linear-gradient';
 import { NavigationBar, setVisibilityAsync } from 'expo-navigation-bar';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { StatusBar } from 'expo-status-bar';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { type AudioTrack, useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useRef, useState } from 'react';
 import { BackHandler, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withSequence, withSpring, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
+import { isPlayable, localMasterFile, readCues } from '@/lib/downloads/files';
+import { type DownloadItem, useDownloads } from '@/lib/downloads/store';
 import { haptics, NotificationFeedbackType } from '@/lib/haptics';
+import { parseMaster, pickVariant, pinnedMaster } from '@/lib/hls';
 import type { TvCommand } from '@/lib/inject';
+import type { PlaySubtitle, SkipTime } from '@/lib/miruro/api';
 import { MiruroError } from '@/lib/miruro/bridge';
 import { proxyUrl } from '@/lib/miruro/codec';
 import { UnmatchedError } from '@/lib/miruro/match';
 import { MissingEpisodeError, type Resolved, resolveEpisode } from '@/lib/miruro/resolve';
 import { type Audio, type Candidate, candidates, defaultSubtitle, hasAudio, probe, usableSubtitles } from '@/lib/miruro/streams';
+import { fetchCues } from '@/lib/miruro/subs';
 import { findEpisode } from '@/lib/nav';
 import { type Session, usePlayer } from '@/lib/player';
 import { queryClient, q } from '@/lib/queries';
-import { resumePoint, useStore } from '@/lib/store';
-import { type Cue, cueAt, parseCues } from '@/lib/subtitles';
+import { type CaptionSize, resumePoint, useStore } from '@/lib/store';
+import { type Cue, cuesAt } from '@/lib/subtitles';
 import { isTV, tv } from '@/lib/tv';
 import { color, radius, spring } from '@/theme/tokens';
 import { Button, IconButton } from './Button';
 import { Icon } from './Icon';
 import { PhoneControls } from './PhoneControls';
 import { PlayerOsd, type Tick } from './PlayerOsd';
+import { PlayerSettings, type SettingKey, type SettingRow } from './PlayerSettings';
 import { Spinner } from './Spinner';
 import { T } from './T';
 
@@ -36,6 +43,9 @@ const START_TIMEOUT = 12_000;
 // How many streams to check in parallel before handing the first to the player.
 const PROBE_FIRST = 4;
 const SAVE_EVERY = 5;
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+const CAPTION_SCALE: Record<CaptionSize, number> = { s: 0.8, m: 1, l: 1.3, xl: 1.6 };
+const CAPTION_LABEL: Record<CaptionSize, string> = { s: 'Small', m: 'Medium', l: 'Large', xl: 'Extra large' };
 
 /** The server that last worked for a show, tried first next time (this run of the app only). */
 const lastGood = new Map<string, { provider: string; server: string }>();
@@ -58,23 +68,27 @@ export function PlayerHost() {
 }
 
 /**
- * Plays an episode natively from miruro.cx's streams: the show is matched to miruro, the episode's
- * streams are ranked (lib/miruro/streams.ts) and tried in turn until one plays. Nothing of the
- * site's own pages is loaded, so there's nothing to show ads.
+ * Plays an episode natively: from a finished download when there is one, otherwise from
+ * miruro.cx's streams (the show is matched to miruro, the episode's streams are ranked by
+ * lib/miruro/streams.ts and tried in turn until one plays). Nothing of the site's own pages is
+ * loaded, so there's nothing to show ads.
  */
 function Player({ session }: { session: Session }) {
   const close = usePlayer((s) => s.close);
   const recordProgress = useStore((s) => s.recordProgress);
   const audio = useStore((s) => s.prefs.audio);
+  const captionSize = useStore((s) => s.prefs.captionSize);
+  const captionBg = useStore((s) => s.prefs.captionBg);
   const [now, setNow] = useState({ id: session.episodeId, slug: session.slug, number: session.number, title: session.title });
   const [load, setLoad] = useState(0);
   const [phase, setPhase] = useState<Phase>('resolving');
   const [problem, setProblem] = useState<Problem | null>(null);
   const [fill, setFill] = useState(false);
-  const [cue, setCue] = useState('');
+  const [cue, setCue] = useState({ bottom: '', top: '' });
   const [skip, setSkip] = useState<{ label: string; to: number } | null>(null);
   const [toast, setToast] = useState<{ text: string; key: number } | null>(null);
   const [closing, setClosing] = useState(false);
+  const [settings, setSettings] = useState<SettingRow[] | null>(null);
 
   // Everything the player's event handlers need, current at all times (they outlive renders).
   const run = useRef({
@@ -87,14 +101,25 @@ function Player({ session }: { session: Session }) {
     retried: false,
     resolved: null as Resolved | null,
     audioUsed: 'sub' as Audio,
-    subs: [] as Candidate['subtitles'],
+    subs: [] as PlaySubtitle[],
+    subsFor: '',
     subIndex: -1,
     cues: [] as Cue[],
-    cue: '',
+    cueKey: '',
+    skips: [] as SkipTime[],
     skipKey: '',
     savedAt: 0,
     fill: false,
     timer: undefined as ReturnType<typeof setTimeout> | undefined,
+    /** Master playlists already fetched (by URL), heights seen, and the height now on screen. */
+    masters: new Map<string, string>(),
+    heights: [] as number[],
+    videoHeight: 0,
+    audioTracks: [] as AudioTrack[],
+    audioApplied: false,
+    /** The finished download being played, and whether to skip it (it wouldn't play). */
+    local: null as DownloadItem | null,
+    skipLocal: false,
   });
   const nowRef = useRef(now);
   useEffect(() => {
@@ -118,9 +143,10 @@ function Player({ session }: { session: Session }) {
 
   /** Clear the screen for a fresh load (the load effect itself only touches refs). */
   function reset() {
-    setCue('');
+    setCue({ bottom: '', top: '' });
     setSkip(null);
     setProblem(null);
+    setSettings(null);
     setPhaseBoth('resolving');
   }
 
@@ -156,15 +182,48 @@ function Player({ session }: { session: Session }) {
     startOverride.current = null;
     r.retried = false;
     r.cues = [];
-    r.cue = '';
+    r.cueKey = '';
+    r.subsFor = '';
     r.skipKey = '';
+    r.skips = [];
+    r.masters = new Map();
+    r.heights = [];
+    r.videoHeight = 0;
+    r.resolved = null;
+    r.local = null;
     r.phase = 'resolving';
     player.pause();
+
+    // A finished download plays from the device, with no network at all.
+    const item = useDownloads.getState().items[now.id];
+    if (!r.skipLocal && isPlayable(item)) {
+      r.local = item;
+      r.skips = item.skips ?? [];
+      r.audioUsed = item.want.audio;
+      r.list = [
+        {
+          key: 'local',
+          uri: localMasterFile(item.id).uri,
+          via: 'local',
+          provider: 'download',
+          server: 'device',
+          track: item.got?.track ?? '',
+          streamUrl: '',
+          referer: null,
+          proxied: false,
+          subtitles: (item.got?.subs ?? []).map((s) => ({ language: s.language, label: s.label, file: s.file, format: 'json' })),
+        },
+      ];
+      start(0);
+      return;
+    }
+    r.skipLocal = false;
 
     (async () => {
       const res = await resolveEpisode(session.showId, now.number);
       if (token !== r.token) return;
       r.resolved = res;
+      r.skips = res.episode.skip_times ?? [];
       let used: Audio = audio;
       let list = candidates(res.play, res.config, res.env, audio, lastGood.get(session.showId));
       if (!list.length) {
@@ -179,15 +238,69 @@ function Player({ session }: { session: Session }) {
       if (!list.length) return fail({ kind: 'stream', tried: 0, other: null });
       // Check the first few at once; ones that don't answer go to the back of the queue.
       const head = list.slice(0, PROBE_FIRST);
-      const alive = await Promise.all(head.map((c) => probe(c)));
+      const texts = await Promise.all(head.map((c) => probe(c)));
       if (token !== r.token) return;
-      r.list = [...head.filter((_, i) => alive[i]), ...list.slice(PROBE_FIRST), ...head.filter((_, i) => !alive[i])];
+      head.forEach((c, i) => {
+        const text = texts[i];
+        if (text) {
+          r.masters.set(c.uri, text);
+          noteHeights(text, c.uri);
+        }
+      });
+      r.list = [...head.filter((_, i) => texts[i]), ...list.slice(PROBE_FIRST), ...head.filter((_, i) => !texts[i])];
+      // A chosen quality is locked from the start, so there's no second start at another one.
+      const want = useStore.getState().prefs.quality;
+      if (want !== 'auto' && r.list[0]) {
+        const pinned = await pinFor(r.list[0], want);
+        if (token !== r.token) return;
+        if (pinned) r.list.unshift(pinned);
+      }
       start(0);
     })().catch((e: unknown) => {
       if (token !== r.token) return;
       fail(classify(e));
     });
   }, [now.id, load, audio]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function noteHeights(text: string, base: string) {
+    const parsed = parseMaster(text, base);
+    if (!parsed) return;
+    const r = run.current;
+    r.heights = [...new Set([...r.heights, ...parsed.variants.map((v) => v.height).filter(Boolean)])].sort((a, b) => b - a);
+  }
+
+  /**
+   * A copy of the candidate's master playlist (fetched through miruro's proxy, so its links need no
+   * headers) keeping only the variant at `height`: ExoPlayer then can't drop to a lower one.
+   */
+  async function pinFor(c: Candidate, height: number): Promise<Candidate | null> {
+    const r = run.current;
+    const env = r.resolved?.env;
+    if (!env || c.via === 'local' || !c.streamUrl) return null;
+    const url = c.via === 'proxy' && !c.uri.startsWith('file:') ? c.uri : proxyUrl(env.a, env.key, c.streamUrl, c.referer, '/pl.m3u8');
+    let text = r.masters.get(url);
+    if (!text) {
+      try {
+        const res = await fetch(url);
+        if (res.ok) text = await res.text();
+      } catch {
+        // No pin: the cap still applies.
+      }
+    }
+    if (!text) return null;
+    r.masters.set(url, text);
+    noteHeights(text, url);
+    const parsed = parseMaster(text, url);
+    if (!parsed || parsed.variants.length < 2) return null;
+    const v = pickVariant(parsed.variants, height);
+    try {
+      const file = new File(Paths.cache, `quality-${Date.now()}.m3u8`);
+      file.writeSync(pinnedMaster(text, url, v));
+      return { ...c, key: `${c.key.replace(/@\d+$/, '')}@${v.height}`, via: 'proxy', uri: file.uri, headers: undefined };
+    } catch {
+      return null;
+    }
+  }
 
   function classify(e: unknown): Problem {
     if (e instanceof UnmatchedError) return { kind: 'unmatched' };
@@ -205,6 +318,7 @@ function Player({ session }: { session: Session }) {
     clearTimeout(run.current.timer);
     player.pause();
     haptics.notify(NotificationFeedbackType.Warning);
+    setSettings(null);
     setProblem(p);
     setPhaseBoth('problem');
   }
@@ -214,17 +328,29 @@ function Player({ session }: { session: Session }) {
     const r = run.current;
     const c = r.list[i];
     if (!c) {
+      if (r.local) {
+        // The download wouldn't play: stream the episode instead.
+        r.skipLocal = true;
+        startOverride.current = r.startAt || null;
+        say('That download wouldn’t play, so it’s streaming');
+        reset();
+        setLoad((n) => n + 1);
+        return;
+      }
       const other: Audio = r.audioUsed === 'sub' ? 'dub' : 'sub';
       return fail({ kind: 'stream', tried: r.list.length, other: r.resolved && hasAudio(r.resolved.play, other) ? other : null });
     }
     const token = r.token;
     r.index = i;
     r.seeked = false;
+    r.audioApplied = false;
     setPhaseBoth('starting');
     clearTimeout(r.timer);
     r.timer = setTimeout(() => {
       if (token === r.token && r.phase === 'starting' && r.index === i) start(i + 1);
     }, START_TIMEOUT);
+    const want = useStore.getState().prefs.quality;
+    player.maxResolution = want === 'auto' ? null : { width: want * 3, height: want };
     player
       .replaceAsync({ uri: c.uri, headers: c.headers, contentType: 'hls', metadata: { title: session.showName, artist: `Episode ${nowRef.current.number}` } })
       .then(() => {
@@ -238,40 +364,33 @@ function Player({ session }: { session: Session }) {
 
   function loadSubtitles(c: Candidate, token: number) {
     const r = run.current;
-    r.subs = usableSubtitles(c.subtitles);
+    // The same streams' subtitles (e.g. after a quality change) are already loaded.
+    const subsFor = `${c.provider}/${c.track}`;
+    if (subsFor === r.subsFor) return;
+    r.subsFor = subsFor;
+    r.subs = c.via === 'local' ? c.subtitles : usableSubtitles(c.subtitles);
     r.cues = [];
-    const first = defaultSubtitle(r.subs);
-    r.subIndex = useStore.getState().prefs.subs && first ? r.subs.indexOf(first) : -1;
-    if (r.subIndex >= 0) fetchCues(r.subIndex, c, token);
+    const prefs = useStore.getState().prefs;
+    const first = c.via === 'local' ? (r.subs.find((s) => prefs.subLang && s.language === prefs.subLang) ?? r.subs[0]) : defaultSubtitle(r.subs, prefs.subLang);
+    r.subIndex = prefs.subs && first ? r.subs.indexOf(first) : -1;
+    if (r.subIndex >= 0) loadCues(r.subIndex, c, token);
   }
 
-  async function fetchCues(index: number, c: Candidate, token: number) {
+  async function loadCues(index: number, c: Candidate, token: number) {
     const r = run.current;
     const sub = r.subs[index];
-    const env = r.resolved?.env;
     if (!sub) return;
-    // The file itself first (as the API lists it), then through miruro's proxy as its site does.
-    const tries: { uri: string; headers?: Record<string, string> }[] = [{ uri: sub.file, headers: c.headers }];
-    if (env) tries.push({ uri: proxyUrl(env.a, env.key, sub.file, c.headers ?? null, '/sub.vtt') });
-    for (const t of tries) {
-      const ctrl = new AbortController();
-      const id = setTimeout(() => ctrl.abort(), 8000);
-      try {
-        const res = await fetch(t.uri, { headers: t.headers, signal: ctrl.signal });
-        if (!res.ok) continue;
-        const cues = parseCues(await res.text());
-        if (token !== r.token || r.subIndex !== index) return;
-        if (cues.length) {
-          r.cues = cues;
-          return;
-        }
-      } catch {
-        // Try the next way.
-      } finally {
-        clearTimeout(id);
-      }
+    if (c.via === 'local' && r.local) {
+      r.cues = readCues(r.local.id, Number(sub.file.split('.')[0]) || 0);
+      if (!r.cues.length) say('Couldn’t read those subtitles');
+      return;
     }
-    if (token === r.token && r.subIndex === index) say('Couldn’t load those subtitles');
+    try {
+      const cues = await fetchCues(sub, c, r.resolved?.env ?? null);
+      if (token === r.token && r.subIndex === index) r.cues = cues;
+    } catch {
+      if (token === r.token && r.subIndex === index) say(`Couldn’t load the ${sub.label} subtitles`);
+    }
   }
 
   useEventListener(player, 'statusChange', ({ status }) => {
@@ -280,12 +399,13 @@ function Player({ session }: { session: Session }) {
       if (r.phase === 'starting') {
         clearTimeout(r.timer);
         const c = r.list[r.index];
-        if (c) lastGood.set(session.showId, { provider: c.provider, server: c.server });
+        if (c && c.via !== 'local') lastGood.set(session.showId, { provider: c.provider, server: c.server });
         setPhaseBoth('playing');
       }
       if (!r.seeked) {
         r.seeked = true;
         if (r.startAt > 0) player.currentTime = r.startAt;
+        player.playbackRate = useStore.getState().prefs.speed;
         player.play();
       }
     } else if (status === 'error') {
@@ -302,20 +422,44 @@ function Player({ session }: { session: Session }) {
     pushTick();
   });
 
+  useEventListener(player, 'sourceLoad', ({ availableVideoTracks, availableAudioTracks }) => {
+    const r = run.current;
+    const hs = availableVideoTracks.map((t) => t.size?.height ?? 0).filter(Boolean);
+    // A locked quality loads a single variant; keep the full list from before.
+    if (hs.length > 1 || !r.heights.length) r.heights = [...new Set([...r.heights, ...hs])].sort((a, b) => b - a);
+    r.audioTracks = availableAudioTracks;
+    applyAudioLang();
+    refreshSettings();
+  });
+
+  useEventListener(player, 'availableAudioTracksChange', ({ availableAudioTracks }) => {
+    run.current.audioTracks = availableAudioTracks;
+    applyAudioLang();
+    refreshSettings();
+  });
+
+  useEventListener(player, 'videoTrackChange', ({ videoTrack }) => {
+    run.current.videoHeight = videoTrack?.size?.height ?? 0;
+    refreshSettings();
+  });
+
+  useEventListener(player, 'audioTrackChange', () => refreshSettings());
+
   useEventListener(player, 'playingChange', () => pushTick());
 
   useEventListener(player, 'timeUpdate', ({ currentTime }) => {
     const r = run.current;
     pushTick(currentTime);
-    const text = r.subIndex >= 0 ? cueAt(r.cues, currentTime) : '';
-    if (text !== r.cue) {
-      r.cue = text;
+    const text = r.subIndex >= 0 ? cuesAt(r.cues, currentTime) : { bottom: '', top: '' };
+    const key = `${text.top}\u0000${text.bottom}`;
+    if (key !== r.cueKey) {
+      r.cueKey = key;
       setCue(text);
     }
-    const window = r.resolved?.episode.skip_times?.find((s) => currentTime >= s.start_seconds && currentTime < s.end_seconds - 2);
-    const key = window ? `${window.kind}:${window.end_seconds}` : '';
-    if (key !== r.skipKey) {
-      r.skipKey = key;
+    const window = r.skips.find((s) => currentTime >= s.start_seconds && currentTime < s.end_seconds - 2);
+    const skipKey = window ? `${window.kind}:${window.end_seconds}` : '';
+    if (skipKey !== r.skipKey) {
+      r.skipKey = skipKey;
       setSkip(window ? { label: window.kind === 'ed' ? 'Skip ending' : window.kind === 'op' ? 'Skip intro' : 'Skip', to: window.end_seconds } : null);
     }
     if (Math.abs(currentTime - r.savedAt) >= SAVE_EVERY) save(currentTime);
@@ -325,6 +469,16 @@ function Player({ session }: { session: Session }) {
     save(player.duration);
     jump(1, true);
   });
+
+  /** The preferred audio language, once per source, when the stream carries several. */
+  function applyAudioLang() {
+    const r = run.current;
+    const lang = useStore.getState().prefs.audioLang?.toLowerCase();
+    if (r.audioApplied || !lang || r.audioTracks.length < 2) return;
+    r.audioApplied = true;
+    const match = r.audioTracks.find((t) => t.language?.toLowerCase() === lang) ?? r.audioTracks.find((t) => t.language?.toLowerCase().startsWith(lang.slice(0, 2)));
+    if (match && player.audioTrack?.id !== match.id) player.audioTrack = match;
+  }
 
   function save(t = player.currentTime) {
     const d = player.duration;
@@ -338,7 +492,7 @@ function Player({ session }: { session: Session }) {
     const r = run.current;
     const sub = r.subIndex >= 0 ? r.subs[r.subIndex] : undefined;
     return {
-      audio: r.resolved ? (r.audioUsed === 'dub' ? 'Dub' : 'Sub') : null,
+      audio: r.resolved || r.local ? (r.audioUsed === 'dub' ? 'Dub' : 'Sub') : null,
       subs: r.subs.length ? (sub ? sub.label : 'Off') : null,
     };
   }
@@ -396,27 +550,166 @@ function Player({ session }: { session: Session }) {
   }
 
   function switchAudio(to?: Audio) {
-    const next: Audio = to ?? (run.current.audioUsed === 'sub' ? 'dub' : 'sub');
-    if (run.current.resolved && !hasAudio(run.current.resolved.play, next)) {
+    const r = run.current;
+    const next: Audio = to ?? (r.audioUsed === 'sub' ? 'dub' : 'sub');
+    if (r.local) {
+      say(r.audioUsed === 'dub' ? 'This download is the dub' : 'This download is subbed');
+      return;
+    }
+    if (r.resolved && !hasAudio(r.resolved.play, next)) {
       say(next === 'dub' ? 'No dub for this episode' : 'No subbed stream for this episode');
       return;
     }
-    startOverride.current = run.current.seeked ? Math.floor(player.currentTime) : null;
+    startOverride.current = r.seeked ? Math.floor(player.currentTime) : null;
     reset();
     if (next === useStore.getState().prefs.audio) setLoad((n) => n + 1);
     else useStore.getState().setPrefs({ audio: next });
   }
 
-  function cycleSubs() {
+  function chooseSubs(index: number) {
     const r = run.current;
     if (!r.subs.length) return;
-    r.subIndex = r.subIndex + 1 >= r.subs.length ? -1 : r.subIndex + 1;
+    r.subIndex = index >= 0 && index < r.subs.length ? index : -1;
     r.cues = [];
-    useStore.getState().setPrefs({ subs: r.subIndex >= 0 });
+    r.cueKey = '';
+    setCue({ bottom: '', top: '' });
+    const sub = r.subIndex >= 0 ? r.subs[r.subIndex] : undefined;
+    useStore.getState().setPrefs(sub ? { subs: true, subLang: sub.language } : { subs: false });
     const c = r.list[r.index];
-    if (r.subIndex >= 0 && c) fetchCues(r.subIndex, c, r.token);
-    say(r.subIndex >= 0 ? `Subtitles: ${r.subs[r.subIndex].label}` : 'Subtitles off');
+    if (sub && c) loadCues(r.subIndex, c, r.token);
+    say(sub ? `Subtitles: ${sub.label}` : 'Subtitles off');
     pushTick();
+  }
+
+  function cycleSubs() {
+    const r = run.current;
+    chooseSubs(r.subIndex + 1 >= r.subs.length ? -1 : r.subIndex + 1);
+  }
+
+  /** Lock (or free) the picture quality. The cap always applies; streams via the proxy are pinned. */
+  async function chooseQuality(id: string) {
+    const r = run.current;
+    const want: 'auto' | number = id === 'auto' ? 'auto' : Number(id);
+    useStore.getState().setPrefs({ quality: want });
+    player.maxResolution = want === 'auto' ? null : { width: want * 3, height: want };
+    const c = r.list[r.index];
+    if (!c || c.via === 'local') {
+      say(want === 'auto' ? 'Quality: Auto' : `Quality: up to ${want}p`);
+      return;
+    }
+    const isPinned = /@\d+$/.test(c.key);
+    if (want === 'auto') {
+      say('Quality: Auto');
+      if (!isPinned) return;
+      // Back to the stream itself, so the player can choose again.
+      r.list.splice(r.index, 1);
+    } else {
+      const pinned = await pinFor(isPinned ? { ...c, key: c.key.replace(/@\d+$/, '') } : c, want);
+      if (!pinned) {
+        say(`Quality: up to ${want}p`);
+        return;
+      }
+      if (isPinned) r.list[r.index] = pinned;
+      else r.list.splice(r.index, 0, pinned);
+      say(`Quality: ${pinned.key.split('@')[1]}p`);
+    }
+    r.startAt = Math.floor(player.currentTime);
+    r.retried = false;
+    start(r.index);
+  }
+
+  function refreshSettings() {
+    if (settingsOpen.current) setSettings(buildSettings());
+  }
+  const settingsOpen = useRef(false);
+
+  function openSettings() {
+    settingsOpen.current = true;
+    setSettings(buildSettings());
+  }
+
+  function closeSettings() {
+    settingsOpen.current = false;
+    setSettings(null);
+  }
+
+  function buildSettings(): SettingRow[] {
+    const r = run.current;
+    const prefs = useStore.getState().prefs;
+    const rows: SettingRow[] = [];
+    const playingHeight = r.videoHeight || player.videoTrack?.size?.height || 0;
+    if (r.heights.length > 1 || (r.heights.length && prefs.quality !== 'auto')) {
+      rows.push({
+        key: 'quality',
+        icon: 'tune-variant',
+        label: 'Quality',
+        value: prefs.quality === 'auto' ? `Auto${playingHeight ? ` (${playingHeight}p)` : ''}` : `${prefs.quality}p`,
+        selected: String(prefs.quality),
+        options: [{ id: 'auto', label: 'Auto', note: playingHeight ? `${playingHeight}p now` : undefined }, ...r.heights.map((h) => ({ id: String(h), label: `${h}p`, note: h >= 1080 ? 'HD' : undefined }))],
+      });
+    }
+    if (r.audioTracks.length > 1) {
+      const current = player.audioTrack;
+      const options = r.audioTracks.map((t, i) => {
+        const base = t.label || t.name || t.language || `Track ${i + 1}`;
+        const dupe = r.audioTracks.filter((x) => (x.label || x.name || x.language) === base).length > 1;
+        return { id: t.id ?? String(i), label: dupe && t.language ? `${base} (${t.language})` : base };
+      });
+      const sel = current ? (current.id ?? String(r.audioTracks.findIndex((t) => t.language === current.language))) : '';
+      rows.push({ key: 'audioLang', icon: 'music-note-outline', label: 'Audio language', value: options.find((o) => o.id === sel)?.label ?? 'Default', selected: sel, options });
+    }
+    if (!r.local && r.resolved) {
+      const subOk = hasAudio(r.resolved.play, 'sub');
+      const dubOk = hasAudio(r.resolved.play, 'dub');
+      if (subOk && dubOk) {
+        rows.push({ key: 'version', icon: 'translate', label: 'Sub or dub', value: r.audioUsed === 'dub' ? 'Dub' : 'Sub', selected: r.audioUsed, options: [{ id: 'sub', label: 'Sub', note: 'Japanese audio' }, { id: 'dub', label: 'Dub', note: 'English audio' }] });
+      }
+    }
+    if (r.subs.length) {
+      const sub = r.subIndex >= 0 ? r.subs[r.subIndex] : undefined;
+      rows.push({ key: 'captions', icon: 'closed-caption-outline', label: 'Captions', value: sub?.label ?? 'Off', selected: String(r.subIndex), options: [{ id: '-1', label: 'Off' }, ...r.subs.map((s, i) => ({ id: String(i), label: s.label }))] });
+      rows.push({ key: 'captionSize', icon: 'format-size', label: 'Caption size', value: CAPTION_LABEL[prefs.captionSize], selected: prefs.captionSize, options: (Object.keys(CAPTION_LABEL) as CaptionSize[]).map((k) => ({ id: k, label: CAPTION_LABEL[k] })) });
+      rows.push({ key: 'captionBg', icon: 'format-color-fill', label: 'Caption background', value: prefs.captionBg ? 'On' : 'Off', selected: prefs.captionBg ? 'on' : 'off', options: [{ id: 'off', label: 'Off', note: 'Outlined text' }, { id: 'on', label: 'On', note: 'Dark box behind text' }] });
+    }
+    rows.push({ key: 'speed', icon: 'speedometer', label: 'Playback speed', value: prefs.speed === 1 ? 'Normal' : `${prefs.speed}×`, selected: String(prefs.speed), options: SPEEDS.map((s) => ({ id: String(s), label: s === 1 ? 'Normal' : `${s}×` })) });
+    return rows;
+  }
+
+  function pickSetting(key: SettingKey, id: string) {
+    const r = run.current;
+    switch (key) {
+      case 'quality':
+        chooseQuality(id);
+        break;
+      case 'audioLang': {
+        const t = r.audioTracks.find((x, i) => (x.id ?? String(i)) === id);
+        if (t) {
+          player.audioTrack = t;
+          useStore.getState().setPrefs({ audioLang: t.language || null });
+        }
+        break;
+      }
+      case 'version':
+        if (id !== r.audioUsed) switchAudio(id as Audio);
+        break;
+      case 'captions':
+        chooseSubs(Number(id));
+        break;
+      case 'captionSize':
+        useStore.getState().setPrefs({ captionSize: id as CaptionSize });
+        break;
+      case 'captionBg':
+        useStore.getState().setPrefs({ captionBg: id === 'on' });
+        break;
+      case 'speed': {
+        const s = Number(id) || 1;
+        player.playbackRate = s;
+        useStore.getState().setPrefs({ speed: s });
+        break;
+      }
+    }
+    // Picking a version reloads the player (and closes the panel); everything else keeps it open.
+    if (key !== 'version') setSettings(buildSettings());
   }
 
   const command = (cmd: TvCommand, arg = 0) => {
@@ -460,6 +753,8 @@ function Player({ session }: { session: Session }) {
   const layer = useAnimatedStyle(() => ({ opacity: show.value, transform: [{ scale: 1.04 - show.value * 0.04 }] }));
   const playing = phase === 'playing' && !closing;
   const episodeLabel = `Episode ${now.number}`;
+  const scale = CAPTION_SCALE[captionSize];
+  const cueText = [styles.cue, { fontSize: styles.cue.fontSize * scale, lineHeight: styles.cue.lineHeight * scale }, captionBg && styles.cueBox];
 
   return (
     <Animated.View style={[StyleSheet.absoluteFill, styles.root, layer]}>
@@ -474,16 +769,21 @@ function Player({ session }: { session: Session }) {
         allowsPictureInPicture={false}
         focusable={false}
       />
-      {cue && playing ? (
+      {cue.top && playing ? (
+        <View pointerEvents="none" style={[styles.cueWrap, styles.cueTop]}>
+          <T style={cueText}>{cue.top}</T>
+        </View>
+      ) : null}
+      {cue.bottom && playing ? (
         <View pointerEvents="none" style={styles.cueWrap}>
-          <T style={styles.cue}>{cue}</T>
+          <T style={cueText}>{cue.bottom}</T>
         </View>
       ) : null}
       {playing && isTV ? (
-        <PlayerOsd title={session.showName} episode={episodeLabel} feedRef={feedRef} onCommand={command} onJump={jump} onExit={exit} skip={skip?.label} onSkip={skipNow} />
+        <PlayerOsd title={session.showName} episode={episodeLabel} feedRef={feedRef} onCommand={command} onJump={jump} onExit={exit} skip={skip?.label} onSkip={skipNow} onSettings={openSettings} blocked={!!settings} />
       ) : null}
-      {playing && !isTV ? <PhoneControls title={session.showName} episode={episodeLabel} feedRef={feedRef} onCommand={command} onJump={jump} onExit={exit} /> : null}
-      {playing && skip ? (
+      {playing && !isTV ? <PhoneControls title={session.showName} episode={episodeLabel} feedRef={feedRef} onCommand={command} onJump={jump} onExit={exit} onSettings={openSettings} /> : null}
+      {playing && skip && !settings ? (
         isTV ? (
           <View pointerEvents="none" style={[styles.skip, styles.skipTv]}>
             <T variant="label">▲ {skip.label}</T>
@@ -495,8 +795,9 @@ function Player({ session }: { session: Session }) {
           </Pressable>
         )
       ) : null}
+      {playing && settings ? <PlayerSettings rows={settings} onPick={pickSetting} onClose={closeSettings} /> : null}
       {(phase === 'resolving' || phase === 'starting') && !closing ? (
-        <Loader name={session.showName} number={now.number} title={now.title} thumb={session.thumb} step={phase} />
+        <Loader name={session.showName} number={now.number} title={now.title} thumb={session.thumb} step={phase} local={!!run.current.local} />
       ) : null}
       {problem && !closing ? <ProblemScreen problem={problem} number={now.number} onRetry={retry} onSwitch={switchAudio} onExit={exit} /> : null}
       {toast ? <Toast key={toast.key} text={toast.text} onDone={() => setToast(null)} /> : null}
@@ -590,7 +891,7 @@ function ProblemScreen({ problem, number, onRetry, onSwitch, onExit }: { problem
   );
 }
 
-function Loader({ name, number, title, thumb, step }: { name: string; number: number; title: string; thumb?: string; step: 'resolving' | 'starting' }) {
+function Loader({ name, number, title, thumb, step, local }: { name: string; number: number; title: string; thumb?: string; step: 'resolving' | 'starting' | 'playing' | 'problem'; local?: boolean }) {
   return (
     <View style={[StyleSheet.absoluteFill, styles.loader]}>
       {thumb ? <Image source={{ uri: thumb }} blurRadius={18} contentFit="cover" style={[StyleSheet.absoluteFill, { opacity: 0.45 }]} /> : null}
@@ -609,7 +910,7 @@ function Loader({ name, number, title, thumb, step }: { name: string; number: nu
           </T>
         ) : null}
         <T variant="caption" faint style={{ marginTop: 10 }}>
-          {step === 'resolving' ? 'Finding the episode…' : 'Starting the stream…'}
+          {local ? 'Playing from your downloads…' : step === 'resolving' ? 'Finding the episode…' : 'Starting the stream…'}
         </T>
       </View>
     </View>
@@ -630,6 +931,8 @@ const styles = StyleSheet.create({
   problemActions: { flexDirection: 'row', gap: 10, marginTop: 18 },
   problemNote: { marginTop: 14, textAlign: 'center' },
   cueWrap: { position: 'absolute', left: '8%', right: '8%', bottom: isTV ? tv(70) : 54, alignItems: 'center' },
+  cueTop: { bottom: undefined, top: isTV ? tv(40) : 24 },
+  cueBox: { backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, textShadowRadius: 0 },
   cue: {
     fontSize: isTV ? tv(26) : 19,
     lineHeight: isTV ? tv(34) : 25,

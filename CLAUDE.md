@@ -10,7 +10,8 @@ anime.nexus's player through the page scripts in `src/lib/inject.ts`.
 
 **Episodes play inside Kitsune, with no ads.** The app never opens a browser, and never loads a page
 of miruro.cx's site (its pages carry ad networks). Video is played by `expo-video` (ExoPlayer) from
-the HLS streams miruro.cx's API lists for an episode. Kitsune never downloads or decrypts streams.
+the HLS streams miruro.cx's API lists for an episode, or from a download on the device. Kitsune
+never decrypts streams: an encrypted one (`#EXT-X-KEY`) is not downloaded.
 
 miruro.cx sits behind Cloudflare, which turns away clients that aren't browsers and sometimes checks
 a browser before letting it through. Kitsune's job is to **stay out of its way**:
@@ -22,8 +23,9 @@ a browser before letting it through. Kitsune's job is to **stay out of its way**
   answered for them. If it keeps coming back, say so on screen.
 - Opening an `/api/` path as a page is blocked outright by the site's firewall (HTTP 403 "Sorry,
   you have been blocked"), so the bridge opens `/robots.txt` and calls the API from there.
-- Stream requests may carry only the `Referer`/`Origin` that the play API lists for that server,
-  or go through miruro's own stream proxy (which needs no headers), as the site's player does.
+- Stream and subtitle requests may carry only the `Referer`/`Origin` that the play API lists for
+  that server, or go through miruro's own stream proxy (which needs no headers), as the site's
+  player does.
 
 ## Layout
 
@@ -40,7 +42,12 @@ src/lib/miruro/api.ts     miruro.cx API calls and types
 src/lib/miruro/score.ts, match.ts  anime.nexus show -> AniList id -> miruro id
 src/lib/miruro/streams.ts ranking an episode's streams, probing them (pure apart from probe)
 src/lib/miruro/resolve.ts everything the player needs for one episode
-src/lib/subtitles.ts      VTT/SRT parsing for subtitle files drawn over the video (pure)
+src/lib/miruro/subs.ts    fetching a subtitle file from where the site would
+src/lib/subtitles.ts      VTT/SRT/ASS parsing, format sniffed from the content (pure)
+src/lib/hls.ts            reading and writing HLS playlists: quality lock, downloads (pure)
+src/lib/downloads/        store.ts (queue, persisted), engine.ts (transfers), files.ts (layout)
+src/components/PlayerSettings.tsx  quality, audio language, sub/dub, captions, caption size, speed
+src/components/DownloadButton.tsx, DownloadSheet.tsx, DownloadsHost.tsx; src/app/downloads.tsx
 src/lib/inject.ts        script strings: the bridge's, and the anime.nexus ones the Tizen module uses
 src/lib/player.ts        zustand store for the one player session
 src/lib/nav.ts           playEpisode, preloadEpisode (a data prefetch), upNext, openShow
@@ -80,8 +87,33 @@ request" otherwise; e.g. `limit=100` works for the AniList lookup and 50 doesn't
 `lib/miruro/api.ts` as they are, and check a new one in a browser on the site first.
 
 Responses with `application/octet-stream` are the gzipped JSON XORed with `miruro/catalog`. The
-stream proxy URL is `PROXY + b64url(xor(url, key)) + "~" + b64url(xor(JSON(headers), key)) +
-"/pl.m3u8"`, with `PROXY` and the hex `key` from `/env2.js`. `scripts/check-miruro.mjs` pins both.
+stream proxy URL is `PROXY + b64url(xor(url, key)) + ("~" + b64url(xor(referer, key)) if the server
+lists a Referer) + "/pl.m3u8"` (`/sub.vtt` for subtitles), with `PROXY` and the hex `key` from
+`/env2.js`. The second part is the Referer **value only**, not JSON of the headers (that form gets
+HTTP 500). `scripts/check-miruro.mjs` pins both with vectors built by the site's own scheme.
+
+Subtitles: never trust the API's `format`. icarus serves ASS files labelled "vtt" behind `.jpeg`
+URLs, which answer only with the listed `Origin`/`Referer` (403 without, 500 through the proxy).
+Proxied providers' subtitles come through the proxy's `/sub.vtt` as the site does.
+
+### Player settings
+
+Quality: `player.maxResolution` caps it, and for a real lock the candidate's master (through the
+proxy, so its links need no headers) is copied to the cache keeping one variant (`hls.pinnedMaster`)
+and played from `file://`. ExoPlayer drops custom headers for a `file://` source, so only proxied
+links work inside one. Audio language uses `player.audioTrack` (icarus carries up to 14). Volume
+boost and Anime4K upscaling need native code expo-video doesn't expose; they aren't offered.
+
+### Downloads
+
+`engine.ts` downloads one episode at a time, 3 segments in parallel, into
+`<documents>/downloads/<id>/` (layout in `files.ts`): `plan.json` first (candidate, every segment
+URL), segments as `.part` then renamed, subtitle cues as JSON, local playlists, and `master.m3u8`
+last, whose presence marks it complete. It resumes from the first missing segment; expired links
+(403/404/410, or segments that keep failing) are looked up again; space is checked as it goes. The
+player plays a finished download from `file://` with no network. Everything runs in the app process:
+Android may stop it in the background, and it carries on next time Kitsune is opened (no foreground
+service). miruro's check is shown for a download only when the person just tapped it (`asking`).
 
 ### The bridge
 

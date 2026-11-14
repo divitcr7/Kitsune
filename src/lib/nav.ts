@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import type { Show } from './api';
 import { haptics } from './haptics';
+import { downloadedByNumber } from './downloads/store';
 import { imgUrl } from './img';
 import { prefetchEpisode } from './miruro/resolve';
 import { type Session, usePlayer } from './player';
@@ -56,10 +57,16 @@ export function preloadEpisode(show: Show | ShowLite, episode: EpisodeLite) {
   prefetchEpisode(show.id, episode.number);
 }
 
-/** Episode `number` of a show (episodes come 100 to a page). */
-export async function findEpisode(showId: string, number: number) {
-  const page = await queryClient.fetchQuery(q.episodes(showId, Math.max(1, Math.ceil(number / 100)), 'asc'));
-  return page.data.find((e) => e.number === number);
+/** Episode `number` of a show (episodes come 100 to a page); offline, a downloaded one. */
+export async function findEpisode(showId: string, number: number): Promise<EpisodeLite | undefined> {
+  try {
+    const page = await queryClient.fetchQuery(q.episodes(showId, Math.max(1, Math.ceil(number / 100)), 'asc'));
+    return page.data.find((e) => e.number === number) ?? downloadedByNumber(showId, number)?.episode;
+  } catch (e) {
+    const saved = downloadedByNumber(showId, number)?.episode;
+    if (saved) return saved;
+    throw e;
+  }
 }
 
 /** The episode "Play" should start: resume, the next one if the last was finished, or episode 1. */

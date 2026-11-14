@@ -1,0 +1,71 @@
+[Script Info]
+Title: English (US)
+Original Script: kodansha  [http://www.crunchyroll.com/user/kodansha]
+Original Translation: 
+Original Editing: 
+Original Timing: 
+Synch Point: 
+Script Updated By: 
+Update Details: 
+ScriptType: v4.00+
+Collisions: Normal
+PlayResX: 640
+PlayResY: 360
+Timer: 0.0000
+WrapStyle: 0
+YCbCr Matrix: TV.709
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,Strikeout,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
+Style: Default,Trebuchet MS,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,1,2,0010,0010,0018,0
+Style: main,Trebuchet MS,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,1,2,0010,0010,0018,0
+Style: top,Trebuchet MS,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,1,8,0010,0010,0018,0
+Style: italics,Trebuchet MS,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,-1,0,0,100,100,0,0,1,2,1,2,0010,0010,0018,0
+Style: italicstop,Trebuchet MS,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,-1,0,0,100,100,0,0,1,2,1,8,0010,0010,0018,0
+Style: flashback,Trebuchet MS,24,&H00FFFFFF,&H000000FF,&H00400000,&H00400000,0,0,0,0,100,100,0,0,1,2,1,2,0010,0010,0018,1
+Style: flashback italics,Trebuchet MS,24,&H00FFFFFF,&H000000FF,&H00400000,&H00400000,0,-1,0,0,100,100,0,0,1,2,1,2,0010,0010,0018,1
+Style: flashbacktop,Trebuchet MS,24,&H00FFFFFF,&H000000FF,&H00400000,&H00400000,0,0,0,0,100,100,0,0,1,2,1,8,0020,0020,0018,0
+Style: flashbackitalicstop,Trebuchet MS,24,&H00FFFFFF,&H000000FF,&H00400000,&H00400000,0,-1,0,0,100,100,0,0,1,2,1,8,0010,0010,0018,0
+Style: overlap,Trebuchet MS,24,&H007FD3F2,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,1,2,0010,0010,0018,0
+Style: overlaptop,Trebuchet MS,24,&H007FD3F2,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,1,8,0010,0010,0018,0
+Style: overlap italics,Trebuchet MS,24,&H007FD3F2,&H000000FF,&H00000000,&H00000000,0,-1,0,0,100,100,0,0,1,2,1,2,0010,0010,0018,0
+Style: sign_Arial,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,2,2,0030,0030,0020,1
+Style: sign_ArialBlack,Arial Black,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,2,2,0030,0030,0020,1
+Style: sign_CourierNew,Courier New,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,2,2,0030,0030,0020,1
+Style: sign_ComicSansMS,Comic Sans MS,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,2,2,0030,0030,0020,1
+Style: sign_Georgia,Georgia,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,2,2,0030,0030,0020,1
+Style: sign_Impact,Impact,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,0030,0030,0020,1
+Style: sign_TimesNewRoman,Times New Roman,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,2,2,0030,0030,0020,1
+Style: sign_TrebuchetMS,Trebuchet MS,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,2,2,0030,0030,0020,1
+Style: sign_Verdana,Verdana,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,2,2,0030,0030,0020,1
+
+[Events]
+Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+Dialogue: 0,0:00:13.98,0:00:17.93,main,Zanka,0000,0000,0000,,Rare for you to contact me, Enjin.
+Dialogue: 0,0:00:18.52,0:00:19.82,main,Zanka,0000,0000,0000,,What're you up—
+Dialogue: 0,0:00:20.88,0:00:21.90,main,Zanka,0000,0000,0000,,Huh?
+Dialogue: 0,0:00:22.94,0:00:25.21,main,Zanka,0000,0000,0000,,You found a natural talent?
+Dialogue: 0,0:00:25.21,0:00:26.21,main,Enjin,0000,0000,0000,,That's right.
+Dialogue: 0,0:00:26.21,0:00:28.72,main,Enjin,0000,0000,0000,,Happened across him in No Man's Land.
+Dialogue: 0,0:00:29.08,0:00:32.22,main,Enjin,0000,0000,0000,,Turns out he's got powers.
+Dialogue: 0,0:00:32.22,0:00:35.20,main,Enjin,0000,0000,0000,,Never seen anything quite like them, either.
+Dialogue: 0,0:00:35.20,0:00:37.87,main,Enjin,0000,0000,0000,,I've recruited him for the Cleaners.
+Dialogue: 0,0:00:38.19,0:00:41.16,main,Enjin,0000,0000,0000,,I'll introduce you two once I'm done here.
+Dialogue: 0,0:00:41.69,0:00:42.87,main,Enjin,0000,0000,0000,,Later.
+Dialogue: 0,0:00:43.83,0:00:47.51,main,Rudo,0000,0000,0000,,Hey, I never said \NI was joining your weird gang.
+Dialogue: 0,0:00:47.51,0:00:49.77,main,Enjin,0000,0000,0000,,You think you're in a position to refuse?
+Dialogue: 0,0:00:49.77,0:00:52.26,main,Rudo,0000,0000,0000,,I told you, I've gotta get back up to the—
+Dialogue: 0,0:00:52.26,0:00:54.56,main,Alice,0000,0000,0000,,You got lucky, kiddo!
+Dialogue: 0,0:00:54.56,0:00:55.87,main,Rudo,0000,0000,0000,,Wh-Who's this old man?!
+Dialogue: 0,0:00:55.87,0:00:58.88,main,Alice,0000,0000,0000,,It takes a real dummy to go \Nwandering around in No Man's Land!
+Dialogue: 0,0:00:58.88,0:01:03.09,main,Alice,0000,0000,0000,,If you'd breathed that air \Nfor much longer, you'd be dead!
+Dialogue: 0,0:01:03.09,0:01:07.09,main,Alice,0000,0000,0000,,And you got yourself kidnapped to boot.
+Dialogue: 0,0:01:07.09,0:01:09.44,main,Alice,0000,0000,0000,,Talk about {\i1}un{\i0}lucky!
+Dialogue: 0,0:01:09.44,0:01:12.40,main,Alice,0000,0000,0000,,You better thank the nice man over there!
+Dialogue: 0,0:01:12.40,0:01:14.60,main,Enjin,0000,0000,0000,,You better thank me, kiddo.
+Dialogue: 0,0:01:14.60,0:01:16.14,italics,Rudo,0000,0000,0000,,Asshole.
+Dialogue: 0,0:01:17.56,0:01:20.20,main,Alice,0000,0000,0000,,And I'm an old {\i1}woman{\i0}!
+Dialogue: 0,0:01:20.20,0:01:21.88,main,Alice,0000,0000,0000,,Treatment's done!
+
+
