@@ -83,7 +83,8 @@ No accounts. No analytics. No trackers. Your list and history stay on your phone
 | 🛡️ **Zero ads** | Episodes play in Kitsune's own native player from miruro.cx's streams. No web page, so no ads, popups or redirects |
 | ⏭️ **Skip intro** | Skip the opening or ending with one tap (Up on a TV remote), sub or dub, and subtitles in your language |
 | ⚙️ **Player settings** | Quality (Auto or locked to 1080p, 720p…), audio language, sub or dub, captions, caption size and background, playback speed |
-| ⬇️ **Downloads** | Save single episodes or whole seasons (sub or dub, your quality) and watch them with no connection. My Stuff → Downloads |
+| ⬇️ **Downloads** | Save single episodes or whole seasons (sub or dub, your quality) and watch them with no connection. They keep going with Kitsune in the background, with progress in a notification. My Stuff → Downloads |
+| 🔔 **New episode alerts** | A notification when a show in My List (or one you're watching) gets a new episode. My Stuff → Notifications |
 | ⏯️ **Pick up anywhere** | Progress saved per episode, Continue Watching on Home and My Stuff, auto-resume, next episode follows along |
 | 📺 **Player-only view** | Just the video, full screen, landscape, immersive, screen stays awake. Pinch to fill the screen |
 | 🔎 **Search & categories** | Live search across English and Japanese titles, browse by genre, popular this week |
@@ -164,7 +165,9 @@ Samsung TVs (Tizen) get Kitsune as a [TizenBrew](https://github.com/reisxd/Tizen
 
 **"Couldn't load the … subtitles".** None of the places the subtitle file can come from answered. Pick another language under Settings → Captions, or try again later.
 
-**Downloads stop when I leave the app.** Downloads run inside Kitsune, and Android pauses apps in the background after a while. Open Kitsune again and they carry on from the last saved piece; nothing is downloaded twice. Keep Kitsune open (the screen stays on while downloading) for a whole season.
+**Downloads in the background.** Downloads keep going when you leave Kitsune or turn the screen off, with a "Downloading" notification showing progress (allow notifications to see it). If Android closes Kitsune anyway (or after a few hours on Android 15), open it again and the queue carries on from the last saved piece; nothing is downloaded twice.
+
+**No new-episode notifications.** Allow notifications for Kitsune, and check My Stuff → Notifications is on. Android decides when background checks run (usually within an hour); battery savers can delay them.
 
 **A download says "Not enough free space" or "This stream can't be saved".** Free some space and tap it to try again. A stream miruro.cx serves encrypted can't be saved; streaming it still works.
 

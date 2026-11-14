@@ -19,6 +19,7 @@ import type { Episode, Show, Stats } from '@/lib/api';
 import { clock, compact, minutes, year } from '@/lib/format';
 import { art, imgUrl, webUrl } from '@/lib/img';
 import { playEpisode, preloadEpisode, previewOf } from '@/lib/nav';
+import { allowNotifications } from '@/lib/notify';
 import { q } from '@/lib/queries';
 import { type EpisodeLite, fraction, resumePoint, useStore } from '@/lib/store';
 import { EDGE, isTV, rowFocus, tv } from '@/lib/tv';
@@ -196,7 +197,15 @@ function Body({ show, stats }: { show: Show; stats?: Stats }) {
         </View>
 
         <View style={[styles.actions, isTV && tvs.actions]}>
-          <Action icon={inList ? 'check' : 'plus'} label="My List" active={inList} onPress={() => toggle(show)} />
+          <Action
+            icon={inList ? 'check' : 'plus'}
+            label="My List"
+            active={inList}
+            onPress={() => {
+              // Following a show is when new-episode alerts start to matter: ask once.
+              if (toggle(show)) allowNotifications(true);
+            }}
+          />
           {total ? <Action icon="download-multiple" label="Download" onPress={() => setSheet(true)} /> : null}
           {isTV ? null : <Action icon="share-variant-outline" label="Share" onPress={() => Share.share({ message: `${show.name}\n${webUrl(`/series/${show.id}/${show.slug}`)}` })} />}
           <Action

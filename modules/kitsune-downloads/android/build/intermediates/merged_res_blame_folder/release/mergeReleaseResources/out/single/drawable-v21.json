@@ -1,0 +1,26 @@
+[
+    {
+        "merged": "app.kitsune.downloads.kitsune-downloads-release-27:/drawable-v21/abc_btn_colored_material.xml",
+        "source": "app.kitsune.downloads.kitsune-downloads-appcompat-1.7.0-10:/drawable-v21/abc_btn_colored_material.xml"
+    },
+    {
+        "merged": "app.kitsune.downloads.kitsune-downloads-release-27:/drawable-v21/abc_dialog_material_background.xml",
+        "source": "app.kitsune.downloads.kitsune-downloads-appcompat-1.7.0-10:/drawable-v21/abc_dialog_material_background.xml"
+    },
+    {
+        "merged": "app.kitsune.downloads.kitsune-downloads-release-27:/drawable-v21/notification_action_background.xml",
+        "source": "app.kitsune.downloads.kitsune-downloads-core-1.13.1-23:/drawable-v21/notification_action_background.xml"
+    },
+    {
+        "merged": "app.kitsune.downloads.kitsune-downloads-release-27:/drawable-v21/abc_action_bar_item_background_material.xml",
+        "source": "app.kitsune.downloads.kitsune-downloads-appcompat-1.7.0-10:/drawable-v21/abc_action_bar_item_background_material.xml"
+    },
+    {
+        "merged": "app.kitsune.downloads.kitsune-downloads-release-27:/drawable-v21/abc_edit_text_material.xml",
+        "source": "app.kitsune.downloads.kitsune-downloads-appcompat-1.7.0-10:/drawable-v21/abc_edit_text_material.xml"
+    },
+    {
+        "merged": "app.kitsune.downloads.kitsune-downloads-release-27:/drawable-v21/abc_list_divider_material.xml",
+        "source": "app.kitsune.downloads.kitsune-downloads-appcompat-1.7.0-10:/drawable-v21/abc_list_divider_material.xml"
+    }
+]

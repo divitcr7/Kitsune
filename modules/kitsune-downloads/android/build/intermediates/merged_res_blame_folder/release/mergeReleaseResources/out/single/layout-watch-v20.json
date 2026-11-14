@@ -1,0 +1,10 @@
+[
+    {
+        "merged": "app.kitsune.downloads.kitsune-downloads-release-27:/layout-watch-v20/abc_alert_dialog_title_material.xml",
+        "source": "app.kitsune.downloads.kitsune-downloads-appcompat-1.7.0-10:/layout-watch-v20/abc_alert_dialog_title_material.xml"
+    },
+    {
+        "merged": "app.kitsune.downloads.kitsune-downloads-release-27:/layout-watch-v20/abc_alert_dialog_button_bar_material.xml",
+        "source": "app.kitsune.downloads.kitsune-downloads-appcompat-1.7.0-10:/layout-watch-v20/abc_alert_dialog_button_bar_material.xml"
+    }
+]

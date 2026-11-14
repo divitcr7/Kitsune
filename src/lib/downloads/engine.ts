@@ -2,6 +2,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { Directory, File, FileMode, Paths } from 'expo-file-system';
 import { localMaster, localMedia, type Media, type MediaPlaylist, parseMaster, parseMedia, pickVariant, type Segment, type Variant } from '../hls';
 import { MiruroError, useBridge } from '../miruro/bridge';
+import { notifyDownloaded } from '../notify';
 import type { SkipTime } from '../miruro/api';
 import { UnmatchedError } from '../miruro/match';
 import { MissingEpisodeError, resolveEpisode } from '../miruro/resolve';
@@ -9,6 +10,7 @@ import { type Candidate, candidates, defaultSubtitle, usableSubtitles } from '..
 import { fetchCues } from '../miruro/subs';
 import { usePlayer } from '../player';
 import { queryClient, q } from '../queries';
+import { holdAwake, letGo, showProgress } from './background';
 import { dirFor, ensureDir, removeFiles, sizeOf, sweepParts } from './files';
 import { type DownloadFail, type DownloadItem, type SavedSub, useDownloadLive, useDownloads } from './store';
 
@@ -52,6 +54,8 @@ class Failure extends Error {
 }
 
 let running: { id: string; ctrl: AbortController } | null = null;
+/** Look-ahead: the next queued episode's plan, made while the current one downloads. */
+const planning = new Map<string, Promise<void>>();
 let quietUntil = 0;
 let wake: ReturnType<typeof setTimeout> | undefined;
 const networkTries = new Map<string, number>();
@@ -71,6 +75,7 @@ export function kick() {
   }
   if (s.paused) {
     sleepOk();
+    letGo();
     return;
   }
   const wait = quietUntil - Date.now();
@@ -83,10 +88,13 @@ export function kick() {
   const id = s.order.find((k) => s.items[k]?.status === 'queued');
   if (!id) {
     sleepOk();
+    letGo();
     return;
   }
   const ctrl = new AbortController();
   running = { id, ctrl };
+  const it = s.items[id];
+  holdAwake(`${it.show.name}  ·  Episode ${it.episode.number}`, 'Finding the stream…');
   activateKeepAwakeAsync('downloads').catch(() => {});
   run(id, ctrl.signal).finally(() => {
     running = null;
@@ -261,11 +269,40 @@ function readPlan(dir: Directory): Plan | null {
   }
 }
 
+/**
+ * Find the next queued episode's stream while this one downloads. Its lookup needs the miruro
+ * bridge (a WebView), which Android destroys if Kitsune is swiped away; with the plan already made,
+ * that episode downloads without it.
+ */
+function planAhead(currentId: string) {
+  const s = useDownloads.getState();
+  const next = s.order.find((k) => k !== currentId && s.items[k]?.status === 'queued');
+  if (!next || planning.has(next)) return;
+  const dir = dirFor(next);
+  if (readPlan(dir)) return;
+  const item = s.items[next];
+  const ctrl = new AbortController();
+  const job = (async () => {
+    ensureDir(dir);
+    await makePlan(item, dir, ctrl.signal);
+  })()
+    .catch(() => {
+      // It'll be looked up again on its turn.
+    })
+    .finally(() => {
+      planning.delete(next);
+      if (!useDownloads.getState().items[next]) removeFiles(next);
+    });
+  planning.set(next, job);
+}
+
 async function download(id: string, signal: AbortSignal) {
   const store = useDownloads.getState();
   const item = store.items[id];
   if (!item) return;
   store.patch(id, { status: 'resolving', fail: undefined });
+  // A look-ahead for this very episode may still be running: let it finish, then use its plan.
+  await planning.get(id);
   const dir = dirFor(id);
   ensureDir(dir);
 
@@ -280,6 +317,7 @@ async function download(id: string, signal: AbortSignal) {
   if (signal.aborted) throw new Error('aborted');
 
   store.patch(id, { status: 'downloading' });
+  planAhead(id);
   try {
     await fetchSegments(id, plan, dir, signal);
   } catch (e) {
@@ -297,6 +335,8 @@ async function download(id: string, signal: AbortSignal) {
   });
   new File(dir, 'master.m3u8').writeSync(localMaster(plan.variant, plan.audio.map((a, i) => ({ media: a.media, file: `a${i}.m3u8` })), 'video.m3u8'));
 
+  const after = useDownloads.getState();
+  notifyDownloaded(item.show.name, item.episode.number, after.order.filter((k) => k !== id && after.items[k]?.status === 'queued').length);
   useDownloads.getState().patch(id, {
     status: 'done',
     doneAt: Date.now(),
@@ -442,7 +482,14 @@ async function fetchSegments(id: string, plan: Plan, dir: Directory, signal: Abo
     if (!force && now - lastLive < 500) return;
     lastLive = now;
     const span = (now - window[0].t) / 1000;
-    live.set({ id, done, total, bytes, bps: span > 0.5 ? (bytes - window[0].b) / span : 0 });
+    const bps = span > 0.5 ? (bytes - window[0].b) / span : 0;
+    live.set({ id, done, total, bytes, bps });
+    const it = useDownloads.getState().items[id];
+    if (it) {
+      const more = useDownloads.getState().order.filter((k) => k !== id && useDownloads.getState().items[k]?.status === 'queued').length;
+      const speed = bps > 0 ? `  ·  ${(bps / 1e6).toFixed(1)} MB/s` : '';
+      showProgress(`${it.show.name}  ·  Episode ${it.episode.number}`, `${Math.floor((done / total) * 100)}%${speed}${more ? `  ·  ${more} more after this` : ''}`, done / total);
+    }
   };
   report(true);
 

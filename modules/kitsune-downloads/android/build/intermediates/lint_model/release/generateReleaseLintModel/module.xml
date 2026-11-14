@@ -1,0 +1,19 @@
+<lint-module
+    format="1"
+    dir="/Users/divitpatidar/Library/Application Support/Claude/scratch-workspaces/3ddf7cf4-a62a-41c0-a96c-fb47a6324a94/419b5bf6-d171-48a6-872f-79f0af1a16f1/scratch-2026-11-14-8d74af/Kitsune/modules/kitsune-downloads/android"
+    name=":kitsune-downloads"
+    type="LIBRARY"
+    maven="app.kitsune:kitsune-downloads:1.0.0"
+    agpVersion="9.2.1"
+    buildFolder="build"
+    bootClassPath="/Users/divitpatidar/Library/Application Support/Claude/scratch-workspaces/3ddf7cf4-a62a-41c0-a96c-fb47a6324a94/419b5bf6-d171-48a6-872f-79f0af1a16f1/scratch-2026-11-14-8d74af/Kitsune/.toolchain/android-sdk/platforms/android-37.0/android.jar:/Users/divitpatidar/Library/Application Support/Claude/scratch-workspaces/3ddf7cf4-a62a-41c0-a96c-fb47a6324a94/419b5bf6-d171-48a6-872f-79f0af1a16f1/scratch-2026-11-14-8d74af/Kitsune/.toolchain/android-sdk/build-tools/36.0.0/core-lambda-stubs.jar"
+    javaSourceLevel="17"
+    compileTarget="android-37.0"
+    neverShrinking="true"
+    highlightGradualR8Api="false">
+  <lintOptions
+      absolutePaths="true"
+      checkReleaseBuilds="true"
+      explainIssues="true"/>
+  <variant name="release"/>
+</lint-module>

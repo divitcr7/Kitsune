@@ -16,6 +16,7 @@ import { useTabScroll } from '@/components/TabBarContext';
 import { TopBar } from '@/components/TopBar';
 import { T } from '@/components/T';
 import { useDownloadLive, useDownloads } from '@/lib/downloads/store';
+import { allowNotifications, setupNotifications } from '@/lib/notify';
 import type { Show } from '@/lib/api';
 import { formatBytes, minutes, timeAgo } from '@/lib/format';
 import { art } from '@/lib/img';
@@ -125,6 +126,9 @@ export default function Library() {
 
         <Header title="Downloads" />
         <DownloadsRow />
+
+        <Header title="Notifications" />
+        <NotifyRow />
 
         <Header title="Account" />
         <AccountRow />
@@ -258,6 +262,30 @@ function DownloadsRow() {
         </T>
       </View>
       <Icon name="chevron-right" tint={color.textFaint} />
+    </Pressable>
+  );
+}
+
+function NotifyRow() {
+  const on = useStore((s) => s.prefs.notify);
+  async function toggle() {
+    const next = !on;
+    if (next && !(await allowNotifications(true))) {
+      // Still turned on: the alerts appear once notifications are allowed in Android's settings.
+    }
+    useStore.getState().setPrefs({ notify: next });
+    setupNotifications();
+  }
+  return (
+    <Pressable onPress={toggle} style={({ pressed, focused }) => [styles.pad, styles.account, pressed && { opacity: 0.6 }, focused && styles.accountFocus]}>
+      <Icon name={on ? 'bell-ring-outline' : 'bell-off-outline'} size={30} tint={color.text} />
+      <View style={{ flex: 1 }}>
+        <T variant="heading">New episode alerts</T>
+        <T variant="caption" faint style={{ marginTop: 2 }}>
+          {on ? 'On  ·  for My List and shows you’re watching' : 'Off'}
+        </T>
+      </View>
+      <Icon name={on ? 'toggle-switch' : 'toggle-switch-off-outline'} size={36} tint={on ? color.accent : color.textFaint} />
     </Pressable>
   );
 }

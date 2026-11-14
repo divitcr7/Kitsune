@@ -18,7 +18,7 @@ a browser before letting it through. Kitsune's job is to **stay out of its way**
 
 - API calls go through a real browser: a hidden WebView on the site's origin (the bridge, below).
   Never call the API from native code, and never set a user agent, replay cookies or add headers to
-  look like a browser. An auto-mode safety check refuses exactly that, and rightly.
+  look like a browser.
 - A Cloudflare check in the bridge is shown to the person (after a short grace period) and never
   answered for them. If it keeps coming back, say so on screen.
 - Opening an `/api/` path as a page is blocked outright by the site's firewall (HTTP 403 "Sorry,
@@ -48,6 +48,9 @@ src/lib/hls.ts            reading and writing HLS playlists: quality lock, downl
 src/lib/downloads/        store.ts (queue, persisted), engine.ts (transfers), files.ts (layout)
 src/components/PlayerSettings.tsx  quality, audio language, sub/dub, captions, caption size, speed
 src/components/DownloadButton.tsx, DownloadSheet.tsx, DownloadsHost.tsx; src/app/downloads.tsx
+src/lib/downloads/background.ts, modules/kitsune-downloads/  background downloads (foreground service)
+src/lib/notify.ts         new-episode and finished-download notifications
+index.js                  app entry: defines background tasks, then loads expo-router
 src/lib/inject.ts        script strings: the bridge's, and the anime.nexus ones the Tizen module uses
 src/lib/player.ts        zustand store for the one player session
 src/lib/nav.ts           playEpisode, preloadEpisode (a data prefetch), upNext, openShow
@@ -111,9 +114,25 @@ boost and Anime4K upscaling need native code expo-video doesn't expose; they are
 URL), segments as `.part` then renamed, subtitle cues as JSON, local playlists, and `master.m3u8`
 last, whose presence marks it complete. It resumes from the first missing segment; expired links
 (403/404/410, or segments that keep failing) are looked up again; space is checked as it goes. The
-player plays a finished download from `file://` with no network. Everything runs in the app process:
-Android may stop it in the background, and it carries on next time Kitsune is opened (no foreground
-service). miruro's check is shown for a download only when the person just tapped it (`asking`).
+player plays a finished download from `file://` with no network. miruro's check is shown for a
+download only when the person just tapped it (`asking`).
+
+Downloads keep going in the background through `modules/kitsune-downloads` (a local Expo module):
+`KitsuneDownloadService` is a foreground service (type dataSync, progress notification, Wi-Fi
+lock) that runs the Headless JS task registered in `src/lib/downloads/background.ts` for as long as
+the queue has work. That matters because React Native stops JavaScript timers in a backgrounded app
+unless a Headless JS task is running (`JavaTimerManager`), and the engine depends on them. While a
+download runs, the engine also makes the next episode's plan (`planAhead`), because Android
+destroys the miruro bridge WebView when Kitsune is swiped away. Android 15 caps dataSync services
+at a few hours a day (`onTimeout` stops it); a killed process resumes on the next launch.
+
+### Notifications
+
+`src/lib/notify.ts` (expo-notifications, expo-background-task): a background task (every 30
+minutes at best, when Android allows) reads anime.nexus's latest-episodes feed and notifies for
+shows in My List or watched in the last 45 days, noting the first sighting of a show without
+notifying. Also a "downloaded" notification while Kitsune is in the background. A tap opens the
+show (or Downloads). `index.js` is the app entry so these tasks are defined before the router.
 
 ### The bridge
 

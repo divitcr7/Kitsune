@@ -23,6 +23,8 @@ export type Prefs = {
   captionBg: boolean;
   /** What a new download is saved as. */
   download: { audio: 'sub' | 'dub'; height: 'best' | number };
+  /** Notify when a followed show has a new episode. */
+  notify: boolean;
 };
 
 export const DEFAULT_PREFS: Prefs = {
@@ -35,6 +37,7 @@ export const DEFAULT_PREFS: Prefs = {
   captionSize: 'm',
   captionBg: false,
   download: { audio: 'sub', height: 1080 },
+  notify: true,
 };
 
 /** Stored prefs over the defaults, so a field added later never comes back undefined. */

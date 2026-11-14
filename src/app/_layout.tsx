@@ -1,13 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
-import { Stack } from 'expo-router';
+import { router, Stack } from 'expo-router';
+import * as Notifications from 'expo-notifications';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import { useEffect, useState } from 'react';
-import { StyleSheet } from 'react-native';
+import { AppState, StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { iconFont } from '@/components/Icon';
 import { DownloadsHost } from '@/components/DownloadsHost';
@@ -15,6 +16,7 @@ import { Intro } from '@/components/Intro';
 import { MiruroBridge } from '@/components/MiruroBridge';
 import { PlayerHost } from '@/components/Player';
 import { UpdateSheet } from '@/components/UpdateSheet';
+import { checkSoon, setupNotifications } from '@/lib/notify';
 import { queryClient } from '@/lib/queries';
 import { isTV } from '@/lib/tv';
 import { color } from '@/theme/tokens';
@@ -27,6 +29,26 @@ const persister = createAsyncStoragePersister({ storage: AsyncStorage, key: 'kit
 export default function RootLayout() {
   const [restored, setRestored] = useState(false);
   const [fonts] = useFonts(iconFont);
+
+  // Notifications: channels and the background check; a tap opens the show (or Downloads).
+  useEffect(() => {
+    setupNotifications();
+    checkSoon();
+    const open = (data: Record<string, unknown> | undefined) => {
+      if (typeof data?.showId === 'string') router.push({ pathname: '/show/[id]', params: { id: data.showId } });
+      else if (data?.screen === 'downloads') router.push('/downloads');
+    };
+    const first = Notifications.getLastNotificationResponse();
+    if (first) setTimeout(() => open(first.notification.request.content.data), 600);
+    const tap = Notifications.addNotificationResponseReceivedListener((r) => open(r.notification.request.content.data));
+    const app = AppState.addEventListener('change', (st) => {
+      if (st === 'active') checkSoon();
+    });
+    return () => {
+      tap.remove();
+      app.remove();
+    };
+  }, []);
 
   // Phones are portrait apart from the player. The manifest no longer says so (a portrait-only
   // app shows up sideways on some TV boxes), so lock it here; a TV keeps its own orientation.

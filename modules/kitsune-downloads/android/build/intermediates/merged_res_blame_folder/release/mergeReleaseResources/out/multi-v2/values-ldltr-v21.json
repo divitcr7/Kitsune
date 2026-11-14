@@ -1,0 +1,34 @@
+{
+    "logs": [
+        {
+            "outputFile": "app.kitsune.downloads.kitsune-downloads-mergeReleaseResources-25:/values-ldltr-v21/values-ldltr-v21.xml",
+            "map": [
+                {
+                    "source": "/Users/divitpatidar/.gradle/caches/9.4.1/transforms/4bf5948e30b5502fe04704dd743568b5/transformed/appcompat-1.7.0/res/values-ldltr-v21/values-ldltr-v21.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "112",
+                        "endOffsets": "163"
+                    }
+                }
+            ]
+        },
+        {
+            "outputFile": "app.kitsune.downloads.kitsune-downloads-release-27:/values-ldltr-v21/values-ldltr-v21.xml",
+            "map": [
+                {
+                    "source": "/Users/divitpatidar/.gradle/caches/9.4.1/transforms/4bf5948e30b5502fe04704dd743568b5/transformed/appcompat-1.7.0/res/values-ldltr-v21/values-ldltr-v21.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "112",
+                        "endOffsets": "163"
+                    }
+                }
+            ]
+        }
+    ]
+}

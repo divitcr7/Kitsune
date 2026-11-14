@@ -100,7 +100,15 @@
           "androidTVBanner": "./assets/images/tv-banner.png"
         }
       ],
-      "expo-video"
+      "expo-video",
+      "expo-background-task",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/android-icon-monochrome.png",
+          "color": "#FF6B3D"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": false,

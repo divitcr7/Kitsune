@@ -1,6 +1,7 @@
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import type { Show } from '@/lib/api';
+import { askForNotifications } from '@/lib/downloads/background';
 import { deleteDownload } from '@/lib/downloads/engine';
 import { type DownloadItem, useDownloadLive, useDownloads } from '@/lib/downloads/store';
 import { haptics } from '@/lib/haptics';
@@ -15,6 +16,7 @@ export function downloadEpisodes(show: Show | ShowLite, episodes: EpisodeLite[],
   const prefs = useStore.getState().prefs;
   const want = { audio: overrides?.audio ?? prefs.download.audio, height: overrides?.height ?? prefs.download.height, audioLang: prefs.audioLang, subLang: prefs.subLang };
   const added = useDownloads.getState().enqueue(show, episodes, want);
+  askForNotifications();
   // The person is waiting on the first one: a Cloudflare check for it may be shown.
   if (episodes[0]) useDownloads.getState().setAsking(episodes[0].id);
   return added;
