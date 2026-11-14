@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>Anime, but make it cinematic.</b><br>
-  A fast, ad-free client for <a href="https://anime.nexus">anime.nexus</a> on Android phones, Android TV and Samsung TVs, built to feel like Apple TV, Max or Paramount+.
+  A fast, ad-free anime app for Android phones, Android TV and Samsung TVs, built to feel like Apple TV, Max or Paramount+. Episodes stream from <a href="https://www.miruro.cx">miruro.cx</a> into Kitsune's own player; you can download them, and get alerts when new ones drop.
 </p>
 
 <p align="center">
@@ -54,7 +54,7 @@
 
 <p align="center">
   <img src="docs/screens/player.png" width="820" alt="Aoashi Season 2 playing full screen in Kitsune"><br>
-  <sub><b>The player:</b> just the video. Aoashi S2, episode 2, playing about a second after tapping Play (it preloaded while the show page was open).</sub>
+  <sub><b>The player:</b> just the video, in Kitsune's own native player, with skip intro, subtitles, quality, audio language and speed a tap away.</sub>
 </p>
 
 <h3 align="center">On the big screen</h3>
@@ -70,9 +70,9 @@
 
 ## Why Kitsune
 
-The site has the catalog. What it doesn't have is an app that respects your time: no popups, no fake download buttons, no new tabs opening themselves, no waiting around for the video. Kitsune puts a clean, cinematic UI on top of the anime.nexus catalog and plays episodes in the site's own player with all the junk stripped out.
+Anime sites have the shows. What they don't have is an app that respects your time: no popups, no fake download buttons, no new tabs opening themselves, no waiting around for the video. Kitsune gives you a clean, cinematic UI for browsing (the catalog comes from anime.nexus) and plays every episode in its own native player from miruro.cx's streams. No website is ever loaded to play a video, so there's nothing to show you ads.
 
-No accounts. No analytics. No trackers. Your list and history stay on your phone.
+No accounts. No analytics. No trackers. Your list, history and downloads stay on your device.
 
 ## Features
 
@@ -86,13 +86,13 @@ No accounts. No analytics. No trackers. Your list and history stay on your phone
 | ⬇️ **Downloads** | Save single episodes or whole seasons (sub or dub, your quality) and watch them with no connection. They keep going with Kitsune in the background, with progress in a notification. My Stuff → Downloads |
 | 🔔 **New episode alerts** | A notification when a show in My List (or one you're watching) gets a new episode. My Stuff → Notifications |
 | ⏯️ **Pick up anywhere** | Progress saved per episode, Continue Watching on Home and My Stuff, auto-resume, next episode follows along |
-| 📺 **Player-only view** | Just the video, full screen, landscape, immersive, screen stays awake. Pinch to fill the screen |
+| 📺 **Player-only view** | Just the video, full screen, landscape, immersive, screen stays awake. Fill or fit the screen with one tap |
 | 🔎 **Search & categories** | Live search across English and Japanese titles, browse by genre, popular this week |
 | 📅 **Schedule** | A weekly TV guide with air times, starting on today |
 | 🔖 **My Stuff** | My List, watch history (swipe to remove), and how many hours you've put in |
 | 🔄 **In-app updates** | New GitHub releases show up in the app: one tap downloads, checks and installs them, and your list and history stay |
 | 📺 **On your TV** | The same APK runs on Android TV and Google TV with a 10-foot UI made for the remote; Samsung TVs get it through TizenBrew |
-| 🪶 **Light** | ~35 MB arm64 APK, R8-shrunk, cached catalog for instant cold starts |
+| 🪶 **Light** | ~55 MB APK for phones and TVs, R8-shrunk, cached catalog for instant cold starts |
 
 ## Install
 
@@ -134,11 +134,11 @@ The APK above is the TV app too: one download for phones and TVs. On a TV it ope
 | Back | Back a screen; from a section, Home; on Home, leave | Close the options row, then the player |
 | ⏯ ⏪ ⏩ ⏮ ⏭ ⏹ | | Play/pause, seek, previous/next episode, stop |
 
-▼ while watching opens **Next episode**, **Audio** (when there's more than one language), **Subtitles** and **Fill / Fit**. Sign in from **Sign in** at the top right: Kitsune shows its own email and password form (the TV keyboard opens on OK) and submits anime.nexus's real form for you; **Use the web page** shows the site's own page instead. Your password only goes to anime.nexus and isn't saved.
+▼ while watching opens **Next episode**, **Audio** (sub or dub), **Subtitles**, **Fill / Fit** and **Settings** (quality, audio language, captions, caption size, speed). ▲ skips the opening or ending while the pill is showing. Downloads and new-episode alerts work on Android TV too.
 
 ## Samsung TV
 
-Samsung TVs (Tizen) get Kitsune as a [TizenBrew](https://github.com/reisxd/TizenBrew) module. A normal Samsung app can't run Kitsune's guard script inside anime.nexus's own player, and Samsung's store doesn't take unofficial clients, so it goes through TizenBrew: install it once with Developer Mode, then add the module [`@divit7/kitsune-tizen`](https://www.npmjs.com/package/@divit7/kitsune-tizen). Same look, same remote controls, same ad-free player. Step-by-step install, supported TVs and troubleshooting: **[tv/tizen/README.md](tv/tizen/README.md)**.
+Samsung TVs (Tizen) get Kitsune as a [TizenBrew](https://github.com/reisxd/TizenBrew) module, since Samsung's store doesn't take unofficial clients: install TizenBrew once with Developer Mode, then add the module [`@divit7/kitsune-tizen`](https://www.npmjs.com/package/@divit7/kitsune-tizen). Same look and the same remote controls. Step-by-step install, supported TVs and troubleshooting: **[tv/tizen/README.md](tv/tizen/README.md)**.
 
 <table align="center">
   <tr>
@@ -189,14 +189,20 @@ Samsung TVs (Tizen) get Kitsune as a [TizenBrew](https://github.com/reisxd/Tizen
  │       ──► episode streams ranked; native player (ExoPlayer) tries │
  │           them in turn until one plays                            │
  │       ──► Kitsune's own controls, subtitles and skip-intro on top │
+ │                                                                   │
+ │  Download ──► the same streams, saved piece by piece to the       │
+ │               device; a foreground service keeps it going in the  │
+ │               background; plays offline from the saved files      │
+ │                                                                   │
+ │  Alerts ──► a background check of the latest episodes for shows   │
+ │             in My List or being watched                           │
  └───────────────────────────────────────────────────────────────────┘
 
  Android TV: the same app (React Native's TV fork), TV layouts when Platform.isTV.
- Samsung TV: a TizenBrew module with a Preact 10-foot UI (tv/tizen); it still uses
-             anime.nexus's player and hasn't moved to miruro.cx yet.
+ Samsung TV: a TizenBrew module with a Preact 10-foot UI (tv/tizen).
 ```
 
-Kitsune never rehosts or decrypts video. It asks miruro.cx for an episode's streams the way the site's own player does and plays them natively, so none of the site's pages (or their ads) are ever loaded.
+Kitsune never rehosts or decrypts video. It asks miruro.cx for an episode's streams the way the site's own player does and plays them natively, so none of the site's pages (or their ads) are ever loaded. Downloads stay on your device.
 
 ## Build it yourself
 
@@ -206,7 +212,7 @@ You need Node 24, a JDK 17+ and the Android SDK (`JAVA_HOME` and `ANDROID_HOME` 
 git clone https://github.com/divitcr7/Kitsune.git
 cd Kitsune
 npm ci
-npm run typecheck      # TypeScript + a parse check of the injected player script
+npm run typecheck      # TypeScript, the injected-script check and the playback checks (scripts/check-miruro.mjs)
 npm run lint
 npm run build:apk      # → dist/Kitsune-v<version>.apk (phones and Android TV)
 npm run build:tizen    # → tv/tizen/dist/kitsune.js (the Samsung TV module)
@@ -234,36 +240,39 @@ Attach exactly one `.apk` to a release, named `Kitsune-vX.Y.Z.apk`. Phones and T
 
 | Path | What lives there |
 | --- | --- |
-| `src/app/` | Screens (Expo Router): `(tabs)/` Home, Search, Schedule, My Stuff; `show/[id]`, `genre/[id]` |
-| `src/components/` | Hero, rails, poster and episode cards, tab bar, player host; `TvNav` and `PlayerOsd` (the TV's menu and player controls) |
-| `src/lib/api.ts` | anime.nexus API client and types |
-| `src/lib/inject.ts` | The script injected into the player page (blocking, player-only view, resume, progress) |
-| `src/lib/player.ts` | The single app-wide player: open, preload (rate-limited), reveal, close, resume after sign-in |
+| `src/app/` | Screens (Expo Router): `(tabs)/` Home, Search, Schedule, My Stuff; `show/[id]`, `genre/[id]`, `downloads` |
+| `src/components/Player.tsx` | The native player (expo-video): finds the streams, tries them in turn, subtitles, skip intro, offline playback |
+| `src/components/` | Hero, rails, cards, tab bar; `PhoneControls`, `PlayerOsd` (TV) and `PlayerSettings`; download button and sheet |
+| `src/lib/miruro/` | miruro.cx: API (through a hidden in-app browser tab), show matching via AniList, stream ranking, subtitles |
+| `src/lib/downloads/` | Download queue, engine and files; `background.ts` with `modules/kitsune-downloads` (the foreground service) |
+| `src/lib/notify.ts` | New-episode and finished-download notifications |
+| `src/lib/hls.ts`, `subtitles.ts` | HLS playlists (quality lock, downloads); VTT, SRT and ASS subtitles |
+| `src/lib/api.ts` | anime.nexus catalog API client and types |
 | `src/lib/updates.ts` | In-app updates from GitHub releases: check, download, verify, install |
 | `src/lib/tv.ts` | `isTV`, 10-foot sizing and overscan margins for the TV layouts |
-| `tv/tizen/` | The Samsung TV module (TizenBrew): its own README, build and a no-network test harness |
-| `src/app/account.tsx` | anime.nexus account screen (sign in, settings) behind the same ad guard as the player |
-| `src/lib/store.ts` | My List, history and progress (persisted on device) |
+| `src/lib/store.ts` | My List, history, progress and player preferences (persisted on device) |
 | `src/lib/queries.ts` | TanStack Query definitions, with an on-disk cache for the home rails |
 | `src/theme/tokens.ts` | Colours, type, radii, motion |
-| `scripts/` | APK build + signing, player script check |
+| `tv/tizen/` | The Samsung TV module (TizenBrew): its own README, build and a no-network test harness |
+| `scripts/` | APK build and signing, GitHub release, script and playback checks |
 
 ## Tech
 
-[Expo SDK 58](https://expo.dev) · [React Native 0.88](https://reactnative.dev) ([TV fork](https://github.com/react-native-tvos/react-native-tvos)) · [Expo Router](https://docs.expo.dev/router/introduction/) · [Reanimated 4](https://docs.swmansion.com/react-native-reanimated/) · [React Compiler](https://react.dev/learn/react-compiler) · [TanStack Query](https://tanstack.com/query) · [Zustand](https://zustand.docs.pmnd.rs) · [expo-image](https://docs.expo.dev/versions/latest/sdk/image/) · [react-native-webview](https://github.com/react-native-webview/react-native-webview) · TypeScript (strict)
+[Expo SDK 58](https://expo.dev) · [React Native 0.88](https://reactnative.dev) ([TV fork](https://github.com/react-native-tvos/react-native-tvos)) · [Expo Router](https://docs.expo.dev/router/introduction/) · [expo-video](https://docs.expo.dev/versions/latest/sdk/video/) (ExoPlayer) · [expo-file-system](https://docs.expo.dev/versions/latest/sdk/filesystem/) · [expo-notifications](https://docs.expo.dev/versions/latest/sdk/notifications/) · [Reanimated 4](https://docs.swmansion.com/react-native-reanimated/) · [React Compiler](https://react.dev/learn/react-compiler) · [TanStack Query](https://tanstack.com/query) · [Zustand](https://zustand.docs.pmnd.rs) · [expo-image](https://docs.expo.dev/versions/latest/sdk/image/) · [react-native-webview](https://github.com/react-native-webview/react-native-webview) · [fflate](https://github.com/101arrowz/fflate) · TypeScript (strict)
 
 ## Credits
 
 Kitsune stands on a lot of great work:
 
-- **[anime.nexus](https://anime.nexus)** for the catalog, artwork and player. Kitsune is an unofficial client and isn't affiliated with or endorsed by anime.nexus.
+- **[miruro.cx](https://www.miruro.cx)** for the streams, subtitles and skip times, and **[anime.nexus](https://anime.nexus)** for the catalog and artwork. Kitsune is an unofficial app and isn't affiliated with or endorsed by either.
+- **[AniList](https://anilist.co)** for its public API, which Kitsune uses to match shows between the two.
 - **[Expo](https://expo.dev)** and **[React Native](https://reactnative.dev)**, plus **[Software Mansion](https://swmansion.com)** for Reanimated, Gesture Handler, Screens and react-native-svg.
 - **[TanStack Query](https://tanstack.com/query)**, **[Zustand](https://github.com/pmndrs/zustand)** and **[react-native-webview](https://github.com/react-native-webview/react-native-webview)**.
 - **[react-native-tvos](https://github.com/react-native-tvos/react-native-tvos)** for TV focus and remote support, **[TizenBrew](https://github.com/reisxd/TizenBrew)** by reisxd for making Samsung TVs possible, and **[Preact](https://preactjs.com)**.
 - **[Material Design Icons](https://pictogrammers.com/library/mdi/)** by Pictogrammers (Apache 2.0), via `@expo/vector-icons`.
 - **[Inter](https://rsms.me/inter/)** by Rasmus Andersson and **[Unbounded](https://unbounded.polkadot.network)**, both under the [SIL Open Font License 1.1](assets/fonts/OFL.txt).
 - Screenshots feature **Aoashi Season 2**. *Aoashi* © Yūgo Kobayashi / Shogakukan and its licensors. Artwork appears only to show the app in use.
-- TV screenshots show titles from the anime.nexus catalog (*The Exiled Heavy Knight Knows How to Game the System*, *Frieren*, *Black Clover* and others); artwork belongs to its owners and appears only to show the app in use. The Android TV shots come from a Google TV emulator; the Samsung shots are the TV module rendering live catalog data at 1920×1080 in its test page. The player shots show the on-screen controls over an episode still.
+- TV screenshots show titles from the catalog (*The Exiled Heavy Knight Knows How to Game the System*, *Frieren*, *Black Clover* and others); artwork belongs to its owners and appears only to show the app in use. The Android TV shots come from a Google TV emulator; the Samsung shots are the TV module rendering live catalog data at 1920×1080 in its test page. The player shots show the on-screen controls over an episode still.
 
 ## Disclaimer
 
