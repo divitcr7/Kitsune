@@ -23,6 +23,7 @@
   <img alt="Expo SDK 58" src="https://img.shields.io/badge/Expo-SDK%2058-white?style=flat-square&logo=expo&logoColor=white&labelColor=0E0E11">
   <img alt="React Native 0.88" src="https://img.shields.io/badge/React%20Native-0.88-61DAFB?style=flat-square&logo=react&logoColor=61DAFB&labelColor=0E0E11">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white&labelColor=0E0E11">
+  <a href="#install"><img alt="Google Play Protect: looks safe" src="https://img.shields.io/badge/Play%20Protect-looks%20safe-34A853?style=flat-square&logo=googleplay&logoColor=white&labelColor=0E0E11"></a>
 </p>
 
 <p align="center">
@@ -105,6 +106,13 @@ shasum -a 256 Kitsune-v1.0.0.apk
 ```
 
 Every release is signed with the same key, so updates install over the top and keep your list and history.
+
+**Safe to install.** Kitsune passes **Google Play Protect**: Android scans the APK when you install it and says *"This app looks safe"*. No ads, no trackers, and only the permissions it needs (notifications, downloads in the background, installing its own updates). The whole source is right here to read. It's built and signed by a real person, from this repo.
+
+<p align="center">
+  <img src="docs/screens/play-protect.jpg" width="260" alt="Google Play Protect: This app looks safe (Kitsune)"><br>
+  <sub>Installing Kitsune: Google Play Protect checks it and finds nothing wrong.</sub>
+</p>
 
 **Updates.** From v1.0.1 on, Kitsune checks this repo's latest release every few hours. When there's a newer one, it shows a sheet with the release notes and an **Update now** button: it downloads the APK, checks it against the release's SHA-256, and opens Android's installer. The first time, Android asks you to allow installs from Kitsune. (Android doesn't let sideloaded apps update silently, so it's one tap rather than none.) You can also check by hand in **My Stuff → Check for updates**.
 
