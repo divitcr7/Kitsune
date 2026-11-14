@@ -41,9 +41,9 @@
 <table align="center">
   <tr>
     <td align="center"><img src="docs/screens/home.png" width="200" alt="Home"><br><sub><b>Home</b></sub></td>
-    <td align="center"><img src="docs/screens/show.png" width="200" alt="Aoashi Season 2"><br><sub><b>Aoashi S2</b></sub></td>
+    <td align="center"><img src="docs/screens/show.png" width="200" alt="Black Clover Season 2"><br><sub><b>Black Clover S2</b></sub></td>
     <td align="center"><img src="docs/screens/episodes.png" width="200" alt="Episodes"><br><sub><b>Episodes</b></sub></td>
-    <td align="center"><img src="docs/screens/rails.png" width="200" alt="Top 10 and new episodes"><br><sub><b>Top 10</b></sub></td>
+    <td align="center"><img src="docs/screens/rails.png" width="200" alt="Continue Watching, Top 10 and new episodes"><br><sub><b>Top 10</b></sub></td>
   </tr>
   <tr>
     <td align="center"><img src="docs/screens/search.png" width="200" alt="Search"><br><sub><b>Search</b></sub></td>
@@ -54,7 +54,7 @@
 </table>
 
 <p align="center">
-  <img src="docs/screens/player.png" width="820" alt="Aoashi Season 2 playing full screen in Kitsune"><br>
+  <img src="docs/screens/player.png" width="820" alt="Black Clover Season 2 playing full screen in Kitsune"><br>
   <sub><b>The player:</b> just the video, in Kitsune's own native player, with skip intro, subtitles, quality, audio language and speed a tap away.</sub>
 </p>
 
@@ -278,7 +278,7 @@ Kitsune stands on a lot of great work:
 - **[Material Design Icons](https://pictogrammers.com/library/mdi/)** by Pictogrammers (Apache 2.0), via `@expo/vector-icons`.
 - **[Inter](https://rsms.me/inter/)** by Rasmus Andersson and **[Unbounded](https://unbounded.polkadot.network)**, both under the [SIL Open Font License 1.1](assets/fonts/OFL.txt).
 - Screenshots feature **Aoashi Season 2**. *Aoashi* © Yūgo Kobayashi / Shogakukan and its licensors. Artwork appears only to show the app in use.
-- TV screenshots show titles from the catalog (*The Exiled Heavy Knight Knows How to Game the System*, *Frieren*, *Black Clover* and others); artwork belongs to its owners and appears only to show the app in use. The Android TV shots come from a Google TV emulator; the Samsung shots are the TV module rendering live catalog data at 1920×1080 in desktop Chrome. The player shots show the on-screen controls over an episode still.
+- Screenshots show titles from miruro.cx's catalog (*Black Clover*, *The Apothecary Diaries*, *ONE PIECE* and others); artwork belongs to its owners and appears only to show the app in use. The phone and Android TV shots come from Android emulators running the release APK; the Samsung shots are the TV module running on miruro.cx at 1920×1080 in desktop Chrome, as TizenBrew runs it. The player shots show the on-screen controls over an episode playing.
 
 ## Disclaimer
 
