@@ -146,7 +146,7 @@ The APK above is the TV app too: one download for phones and TVs. On a TV it ope
 
 ## Samsung TV
 
-Samsung TVs (Tizen) get Kitsune as a [TizenBrew](https://github.com/reisxd/TizenBrew) module, since Samsung's store doesn't take unofficial clients: install TizenBrew once with Developer Mode, then add the module [`@divit7/kitsune-tizen`](https://www.npmjs.com/package/@divit7/kitsune-tizen). Same look and the same remote controls. Step-by-step install, supported TVs and troubleshooting: **[tv/tizen/README.md](tv/tizen/README.md)**.
+Samsung TVs (Tizen) get Kitsune as a [TizenBrew](https://github.com/reisxd/TizenBrew) module, since Samsung's store doesn't take unofficial clients: install TizenBrew once with Developer Mode, then add the module [`@divit7/kitsune-tizen`](https://www.npmjs.com/package/@divit7/kitsune-tizen). Same look, the same miruro.cx catalog, and episodes in Kitsune's own player (quality, audio language, subtitles, skip intro) with the remote. Step-by-step install, supported TVs and troubleshooting: **[tv/tizen/README.md](tv/tizen/README.md)**.
 
 <table align="center">
   <tr>
@@ -260,7 +260,7 @@ Attach exactly one `.apk` to a release, named `Kitsune-vX.Y.Z.apk`. Phones and T
 | `src/lib/store.ts` | My List, history, progress and player preferences (persisted on device) |
 | `src/lib/queries.ts` | TanStack Query definitions, with an on-disk cache for the home rails |
 | `src/theme/tokens.ts` | Colours, type, radii, motion |
-| `tv/tizen/` | The Samsung TV module (TizenBrew): its own README, build and a no-network test harness |
+| `tv/tizen/` | The Samsung TV module (TizenBrew): its own README, build, catalog client and player |
 | `scripts/` | APK build and signing, GitHub release, script and playback checks |
 
 ## Tech
@@ -278,7 +278,7 @@ Kitsune stands on a lot of great work:
 - **[Material Design Icons](https://pictogrammers.com/library/mdi/)** by Pictogrammers (Apache 2.0), via `@expo/vector-icons`.
 - **[Inter](https://rsms.me/inter/)** by Rasmus Andersson and **[Unbounded](https://unbounded.polkadot.network)**, both under the [SIL Open Font License 1.1](assets/fonts/OFL.txt).
 - Screenshots feature **Aoashi Season 2**. *Aoashi* © Yūgo Kobayashi / Shogakukan and its licensors. Artwork appears only to show the app in use.
-- TV screenshots show titles from the catalog (*The Exiled Heavy Knight Knows How to Game the System*, *Frieren*, *Black Clover* and others); artwork belongs to its owners and appears only to show the app in use. The Android TV shots come from a Google TV emulator; the Samsung shots are the TV module rendering live catalog data at 1920×1080 in its test page. The player shots show the on-screen controls over an episode still.
+- TV screenshots show titles from the catalog (*The Exiled Heavy Knight Knows How to Game the System*, *Frieren*, *Black Clover* and others); artwork belongs to its owners and appears only to show the app in use. The Android TV shots come from a Google TV emulator; the Samsung shots are the TV module rendering live catalog data at 1920×1080 in desktop Chrome. The player shots show the on-screen controls over an episode still.
 
 ## Disclaimer
 

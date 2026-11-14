@@ -1,32 +1,44 @@
 import { useEffect, useState } from 'preact/hooks';
-import type { Episode, ImageSet, Show } from '@/lib/api';
+import type { Episode, ImageSet, Show } from '@/lib/catalog';
 
 /*
- * My List, history and progress, kept in anime.nexus's localStorage on the TV. Same shapes and rules
- * as the phone's store (src/lib/store.ts), stored the way zustand's persist does ({ state, version }),
- * so the two stay interchangeable.
+ * My List, history, progress and player choices, kept in miruro.cx's localStorage on the TV. Same
+ * shapes and rules as the phone's store (src/lib/store.ts), stored the way zustand's persist does
+ * ({ state, version }). Ids are miruro's: shows by their id, episodes as `${showId}:${number}`.
  */
 export type ShowLite = Pick<Show, 'id' | 'slug' | 'name'> & { poster?: ImageSet; background?: ImageSet };
 export type EpisodeLite = Pick<Episode, 'id' | 'slug' | 'number' | 'title' | 'duration'> & { image?: ImageSet };
 export type Progress = { t: number; d: number; at: number };
 export type HistoryEntry = { show: ShowLite; episode: EpisodeLite; at: number };
 
+export type Prefs = {
+  audio: 'sub' | 'dub';
+  /** Subtitle language code, or 'off'. */
+  subLang: string;
+  /** Audio track language for streams that carry several (null: the stream's default). */
+  audioLang: string | null;
+  /** Highest picture height to play (0: automatic). */
+  quality: number;
+  fill: boolean;
+};
+
+const DEFAULT_PREFS: Prefs = { audio: 'sub', subLang: 'en', audioLang: null, quality: 0, fill: false };
+
 type State = {
   myList: ShowLite[];
   history: Record<string, HistoryEntry>;
   progress: Record<string, Progress>;
-  /** Last known anime.nexus sign-in state (null: never checked). */
-  signedIn: boolean | null;
+  prefs: Prefs;
 };
 
 const KEY = 'kitsune:store';
-const MAX_PROGRESS = 800;
+const MAX_PROGRESS = 2000;
 
 function load(): State {
-  const empty: State = { myList: [], history: {}, progress: {}, signedIn: null };
+  const empty: State = { myList: [], history: {}, progress: {}, prefs: DEFAULT_PREFS };
   try {
     const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
-    return saved && saved.state ? { ...empty, ...saved.state } : empty;
+    return saved && saved.state ? { ...empty, ...saved.state, prefs: { ...DEFAULT_PREFS, ...saved.state.prefs } } : empty;
   } catch {
     return empty;
   }
@@ -38,7 +50,7 @@ const subs = new Set<() => void>();
 function set(patch: Partial<State>) {
   state = { ...state, ...patch };
   try {
-    localStorage.setItem(KEY, JSON.stringify({ state, version: 1 }));
+    localStorage.setItem(KEY, JSON.stringify({ state, version: 2 }));
   } catch {}
   subs.forEach((fn) => fn());
 }
@@ -52,11 +64,6 @@ export const store = {
     return () => {
       subs.delete(fn);
     };
-  },
-  /** Re-read after another page (the player, the sign-in page) changed it. */
-  reload() {
-    state = load();
-    subs.forEach((fn) => fn());
   },
 
   toggleList(show: ShowLite) {
@@ -77,20 +84,7 @@ export const store = {
       ids.slice(0, ids.length - MAX_PROGRESS).forEach((id) => delete progress[id]);
     }
     const entry = state.history[showId];
-    // The site's player can move on to the next episode by itself; follow it.
-    const history =
-      entry && entry.episode.id !== ep.id
-        ? {
-            ...state.history,
-            [showId]: {
-              ...entry,
-              episode: { id: ep.id, slug: ep.slug, number: ep.number ?? entry.episode.number + 1, title: null, duration: d },
-              at: Date.now(),
-            },
-          }
-        : entry
-          ? { ...state.history, [showId]: { ...entry, at: Date.now() } }
-          : state.history;
+    const history = entry && entry.episode.id === ep.id ? { ...state.history, [showId]: { ...entry, at: Date.now() } } : state.history;
     set({ progress, history });
   },
 
@@ -100,8 +94,8 @@ export const store = {
     set({ history });
   },
 
-  setSignedIn(signedIn: boolean) {
-    if (state.signedIn !== signedIn) set({ signedIn });
+  setPrefs(patch: Partial<Prefs>) {
+    set({ prefs: { ...state.prefs, ...patch } });
   },
 };
 
@@ -125,8 +119,8 @@ export function fraction(p?: Progress) {
 }
 
 /*
- * Per-tab session state that has to survive the full page loads between Kitsune's UI, the site's
- * player and its sign-in page.
+ * Per-tab state that survives a reload (Cloudflare can ask for one): the screen stack and what was
+ * playing.
  */
 export type Playing = { show: ShowLite; episode: EpisodeLite; thumb?: string };
 

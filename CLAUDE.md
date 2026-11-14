@@ -3,8 +3,8 @@
 An Android client with its own native UI over [miruro.cx](https://www.miruro.cx)'s catalog, with
 episodes streamed from miruro.cx into the app's own native player. One Expo /
 React Native app (TypeScript, `react-native-tvos`) ships as a single APK for Android phones and
-Android TV; `tv/tizen` is a separate Samsung TV build (Preact, a TizenBrew module) that still uses
-anime.nexus's player through the page scripts in `src/lib/inject.ts`.
+Android TV; `tv/tizen` is a separate Samsung TV build (Preact, a TizenBrew module) on the same
+miruro.cx catalog and streams, with its own `<video>` player.
 
 ## The rules about video
 
@@ -31,7 +31,7 @@ a browser before letting it through. Kitsune's job is to **stay out of its way**
 
 ```
 src/app/                 expo-router screens: (tabs)/ index, discover, schedule, library;
-                         show/[id], genre/[id], account
+                         show/[id], genre/[id], downloads
 src/components/Player.tsx      the app's single player: resolve, try streams, loader, problems
 src/components/PhoneControls.tsx  phone controls over the video (tap to show; seek bar, sub/dub, CC)
 src/components/PlayerOsd.tsx   Android TV on-screen controls, driven by the player's ticks
@@ -53,14 +53,15 @@ src/components/DownloadButton.tsx, DownloadSheet.tsx, DownloadsHost.tsx; src/app
 src/lib/downloads/background.ts, modules/kitsune-downloads/  background downloads (foreground service)
 src/lib/notify.ts         new-episode and finished-download notifications
 index.js                  app entry: defines background tasks, then loads expo-router
-src/lib/inject.ts        script strings: the bridge's, and the anime.nexus ones the Tizen module uses
+src/lib/inject.ts        script strings for the bridge tab (gate, bridgeScript, apiCallScript)
 src/lib/player.ts        zustand store for the one player session
 src/lib/nav.ts           playEpisode, preloadEpisode (a data prefetch), upNext, openShow
 src/lib/api.ts, queries.ts  `api` = createCatalog(bridge), and every query via TanStack Query
 src/lib/store.ts         persisted list, history, progress, show links, sub/dub prefs (AsyncStorage)
 src/lib/tv.ts            isTV and TV sizing helpers
 src/lib/updates.ts       in-app updates from GitHub releases
-tv/tizen/                Samsung TV module; imports src/lib/inject.ts, own UI in tv/tizen/src/ui
+tv/tizen/                Samsung TV module: shares catalog.ts, miruro/codec.ts, streams.ts, subtitles.ts;
+                         own UI in tv/tizen/src/ui, player in player.tsx + engine.ts (hls.js)
 scripts/                 build-apk.sh, check-player-script.mjs, check-miruro.mjs, github-release.sh,
                          publish-tizen.sh; fixtures/ holds a real miruro.cx response for the checks
 ```
@@ -181,9 +182,9 @@ script, so neither of those identifies a check page.
 
 The scripts are JavaScript inside TypeScript template literals, so the compiler cannot see them.
 
-- **ES5 only**: `var`, `function`, no arrow functions, no `let`/`const`, no template literals. The
-  same strings run on 2017-era Samsung TV browsers.
-- Backslashes are doubled (`\\/watch\\/`); one lost backslash breaks the whole script silently.
+- **ES5 only**: `var`, `function`, no arrow functions, no `let`/`const`, no template literals. They
+  run in whatever WebView an old Android TV box has.
+- Backslashes are doubled (`\\/api\\/`); one lost backslash breaks the whole script silently.
 - Every `function name(` in one script must be unique (declarations hoist and overwrite).
 - Scripts must be idempotent and work whether they land at document start or after load.
 - End injected snippets with `true;`.
@@ -196,9 +197,15 @@ The scripts are JavaScript inside TypeScript template literals, so the compiler 
 the person must act on needs focus (`hasTVPreferredFocus`, `FocusBlock`, `web.requestFocus()`), and
 sizes go through `tv(n)`. A TV has no browser and no Back button on screen; do not add either.
 
-The Samsung module runs in the site's own page: `tv/tizen/src/bridge.ts` stands in for
-`ReactNativeWebView`, and `shell.ts` has its own check detection. Its output must be ES5
-(`npm run build:tizen` fails otherwise) and its CSS avoids flex `gap`, grid and custom properties.
+The Samsung module runs on `https://www.miruro.cx/robots.txt` itself (TizenBrew's `websiteURL`), so
+it calls the API with same-origin XHR (`tv/tizen/src/miruro.ts`, decoded by `codec.ts`) and plays
+in its own `<video>`: hls.js 1.5.20 from jsDelivr (quality and audio choices), native HLS where
+hls.js can't run. A browser can't send a server's `Referer`, so the TV plays proxied streams only
+(`tvCandidates`); icarus comes burned-in, and clean streams get the proxy's `/sub.vtt` drawn as an
+overlay. An HTML 403 from the API reloads the page so Cloudflare's check shows (`shell.ts` steps
+aside for it). Its output must be ES5 (`npm run build:tizen` fails otherwise; runtime gaps such as
+`trimStart` go in `polyfills.ts`) and its CSS avoids flex `gap`, grid and custom properties. Test it
+by running `dist/kitsune.js` in a desktop Chrome tab on that robots.txt page.
 
 ## Commands
 
@@ -225,10 +232,10 @@ The app itself only runs on a device. Without one:
 
 - `npm run typecheck` runs `check-miruro.mjs`: decoding a real captured response, the proxy URL
   scheme against one built by the site, show matching, stream ranking, VTT/SRT parsing.
+- The TV module can be run as it is in a browser tab on that page (see tv/tizen/README.md).
 - The bridge script can be run as it is in a browser tab on `https://www.miruro.cx/robots.txt`:
   define `window.ReactNativeWebView.postMessage`, eval `bridgeScript`, call `window.__kitsuneApi`,
   and check the `res` messages (status 200, `application/octet-stream` for catalog paths).
-- `score.ts` can be run against AniList's live API from Node for a list of real show names.
 
 What only a device can show: ExoPlayer actually playing the proxied and direct streams, whether
 Cloudflare lets the Android WebView through, and focus on Android TV. Say plainly in the write-up

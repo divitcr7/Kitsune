@@ -13,6 +13,13 @@ if (!String.prototype.padStart) {
   };
 }
 
+if (!String.prototype.trimStart) {
+  // eslint-disable-next-line no-extend-native -- polyfill for Chromium before 66
+  String.prototype.trimStart = function (this: string) {
+    return String(this).replace(/^\s+/, '');
+  };
+}
+
 const O = Object as unknown as Loose;
 if (!O.entries) O.entries = (o: Loose) => Object.keys(o).map((k) => [k, o[k]]);
 if (!O.values) O.values = (o: Loose) => Object.keys(o).map((k) => o[k]);

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
-import type { Show } from '@/lib/api';
+import { useMemo } from 'preact/hooks';
+import type { Show } from '@/lib/catalog';
 import { minutes, timeAgo } from '@/lib/format';
 import { imgUrl } from '@/lib/img';
-import { checkSignedIn, openShow, playEpisode, router } from '../nav';
+import { openShow, playEpisode } from '../nav';
 import { fraction, type HistoryEntry, store, useStore } from '../store';
 import { Btn, ContinueCard, Fox, Grid, Icon, Img, Rail } from './kit';
 
@@ -70,13 +70,6 @@ export function Library() {
           )}
         </div>
 
-        <div className="k-rail-head t-title k-section" data-row="">
-          Account
-        </div>
-        <div className="k-pad" data-row="">
-          <AccountRow />
-        </div>
-
         <About />
         <div style={{ height: 120 }} />
       </div>
@@ -121,22 +114,6 @@ function HistoryRow({ entry }: { entry: HistoryEntry }) {
   );
 }
 
-function AccountRow() {
-  const signedIn = useStore((s) => s.signedIn);
-  return (
-    <div className="k-row" data-f="" data-k="lib:account" onClick={() => router.go({ name: 'account' })} style={{ borderTop: 0 }}>
-      <Icon name="accountCircleOutline" size={56} />
-      <div style={{ flex: 1, marginLeft: 24 }}>
-        <div className="t-heading">anime.nexus account</div>
-        <div className="t-caption k-faint" style={{ marginTop: 4 }}>
-          {signedIn ? 'Signed in  ·  manage or sign out' : 'Sign in so streams don’t get interrupted'}
-        </div>
-      </div>
-      <Icon name="chevronRight" size={40} className="go" />
-    </div>
-  );
-}
-
 function About() {
   return (
     <div className="k-pad k-section" data-row="">
@@ -150,54 +127,8 @@ function About() {
         </div>
       </div>
       <div className="t-caption k-faint" style={{ marginTop: 20, width: 1100, lineHeight: '30px' }}>
-        Catalog and streams come from anime.nexus and play in its own player. Kitsune isn’t affiliated with anime.nexus and hosts no content.
+        Catalog and streams come from miruro.cx and play in Kitsune’s own player, with no ads. Kitsune isn’t affiliated with miruro.cx and hosts no content.
         Your list and history stay on this TV.
-      </div>
-    </div>
-  );
-}
-
-export function Account() {
-  const signedIn = useStore((s) => s.signedIn);
-  const [checking, setChecking] = useState(false);
-
-  const check = () => {
-    setChecking(true);
-    checkSignedIn().then(
-      () => setChecking(false),
-      () => setChecking(false),
-    );
-  };
-  useEffect(check, []);
-
-  const go = (path: string) => {
-    if (window.__kitsuneDev) return console.log('[dev] open', path);
-    location.replace(path);
-  };
-
-  return (
-    <div className="k-screen">
-      <div className="k-head" style={{ paddingTop: 120 }}>
-        <div className="t-display">anime.nexus account</div>
-        <div className={`t-heading ${signedIn ? 'k-accent' : 'k-faint'}`} style={{ marginTop: 10 }}>
-          {checking && signedIn === null ? 'Checking…' : signedIn ? 'Signed in' : 'Not signed in'}
-        </div>
-        <div className="t-body k-dim" style={{ marginTop: 26, width: 1100 }}>
-          {signedIn
-            ? 'Streams play as you, with no guest limits. You can manage your account or sign out on anime.nexus’s settings page.'
-            : 'anime.nexus limits how many guest streams a TV can start. Sign in once with your anime.nexus email and password and Kitsune streams as you. Your login is only sent to anime.nexus.'}
-        </div>
-        <div className="k-btns" style={{ marginTop: 40 }}>
-          {signedIn ? (
-            <Btn k="acct:manage" autofocus primary icon="accountCircleOutline" label="Account settings" onClick={() => go('/user/settings')} />
-          ) : (
-            <Btn k="acct:signin" autofocus primary icon="login" label="Sign in" onClick={() => go('/login')} />
-          )}
-          <Btn k="acct:check" icon="refresh" label={checking ? 'Checking…' : 'Check again'} onClick={check} />
-        </div>
-        <div className="t-caption k-faint" style={{ marginTop: 34, width: 1100, lineHeight: '30px' }}>
-          Signed up with Google? Google doesn’t allow its sign-in on TVs. Add a password to your account on anime.nexus in a browser, then sign in here with your email.
-        </div>
       </div>
     </div>
   );

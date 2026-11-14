@@ -1,5 +1,5 @@
 import { miruroGet } from './bridge';
-import type { ProxyEnv } from './codec';
+import { FALLBACK_ENV, parseEnv, type ProxyEnv } from './codec';
 
 /**
  * miruro.cx's API, as its own site uses it. The catalog answers only the exact query shapes the
@@ -47,25 +47,17 @@ export type PlayInfo = { episode_number: number; tracks: PlayTrack[] };
 
 type List<T> = { data: T[]; has_more?: boolean; next_cursor?: string | null };
 
-// What the site shipped with at the time of writing; /env2.js is read for the current values.
-const FALLBACK_ENV: ProxyEnv = { a: 'https://s1.keeply.top/', b: 'https://s2.keeply.top/', key: 'a54d389c18527d9fd3e7f0643e27edbe' };
-
 export function config(signal?: AbortSignal): Promise<MiruroConfig> {
   return miruroGet<MiruroConfig>('/api/config', signal);
 }
 
 export async function env(signal?: AbortSignal): Promise<ProxyEnv> {
   try {
-    const js = await miruroGet<string>('/env2.js', signal);
-    const pick = (name: string) => (typeof js === 'string' ? js.match(new RegExp(`"${name}":"([^"]+)"`))?.[1] : undefined);
-    const a = pick('VITE_PROXY_A');
-    const b = pick('VITE_PROXY_B');
-    const key = pick('VITE_PROXY_OBF_KEY');
-    if (a && key && /^[0-9a-f]+$/i.test(key)) return { a, b: b ?? a, key };
+    return parseEnv(await miruroGet<string>('/env2.js', signal));
   } catch {
-    // Fall through: the values change rarely.
+    // The values change rarely.
+    return FALLBACK_ENV;
   }
-  return FALLBACK_ENV;
 }
 
 /** The miruro entry for an AniList id. */

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
-import type { Show } from '@/lib/api';
+import type { Show } from '@/lib/catalog';
 import { year } from '@/lib/format';
 import { imgUrl } from '@/lib/img';
 import { api, rails, useData } from '../api';
@@ -25,7 +25,7 @@ export function Home() {
         <Hero items={featured.data} />
         {featured.error && !featured.data ? (
           <div className="k-error">
-            <div className="t-title">Can’t reach anime.nexus</div>
+            <div className="t-title">Can’t reach miruro.cx</div>
             <div className="t-body k-dim">Check the TV’s connection, then press Back and open Kitsune again.</div>
           </div>
         ) : null}

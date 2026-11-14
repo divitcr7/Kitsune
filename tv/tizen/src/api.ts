@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { api } from '@/lib/api';
+import { api } from './miruro';
 
 export { api };
 

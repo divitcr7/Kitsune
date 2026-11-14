@@ -1,10 +1,10 @@
 {
   "name": "@divit7/kitsune-tizen",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "appName": "Kitsune",
-  "description": "Kitsune for Samsung TVs: anime.nexus with a cinematic 10-foot UI and no ads, as a TizenBrew module.",
+  "description": "Kitsune for Samsung TVs: miruro.cx with a cinematic 10-foot UI, its own player and no ads, as a TizenBrew module.",
   "packageType": "mods",
-  "websiteURL": "https://anime.nexus/robots.txt",
+  "websiteURL": "https://www.miruro.cx/robots.txt",
   "main": "dist/kitsune.js",
   "keys": [
     "MediaPlayPause",
@@ -33,5 +33,5 @@
     "url": "git+https://github.com/divitcr7/Kitsune.git",
     "directory": "tv/tizen"
   },
-  "kitsuneNotes": "Clearer error screens when anime.nexus won't start a video, and this notice when Kitsune updates."
+  "kitsuneNotes": "Now on miruro.cx: its catalog, and episodes in Kitsune’s own player with quality, audio language, subtitles and skip intro."
 }

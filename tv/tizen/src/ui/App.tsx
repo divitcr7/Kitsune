@@ -2,13 +2,14 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { activate, focus, focusInitial, focused, move, refocus } from '../focus';
 import { exitApp, isTyping, onKeys } from '../keys';
-import { format, type Route, router, TABS } from '../nav';
-import { useStore } from '../store';
-import { Account, Library } from './Library';
+import { format, player, type Route, router, TABS } from '../nav';
+import { Player, playerKey } from '../player';
+import { loadHls } from '../engine';
+import { Library } from './Library';
 import { GenreScreen, Schedule, Search } from './Browse';
 import { Home } from './Home';
 import { ShowScreen } from './Show';
-import { Btn, Fox, Icon } from './kit';
+import { Btn, Fox } from './kit';
 
 declare const KITSUNE_VERSION: string;
 declare const KITSUNE_NOTES: string;
@@ -24,6 +25,12 @@ function newVersion() {
   }
 }
 
+function usePlaying() {
+  const [playing, setPlaying] = useState(player.get());
+  useEffect(() => player.subscribe(() => setPlaying(player.get())), []);
+  return playing;
+}
+
 function useRoute() {
   const [route, setRoute] = useState(router.top());
   useEffect(() => router.subscribe(() => setRoute(router.top())), []);
@@ -35,6 +42,7 @@ const lastFocus: Record<string, string> = {};
 
 export function App() {
   const route = useRoute();
+  const playing = usePlaying();
   const key = format(route);
   const [leaving, setLeaving] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -57,6 +65,7 @@ export function App() {
   useEffect(
     () =>
       onKeys((action) => {
+        if (player.get()) return playerKey(action);
         pressed.current = true;
         if (isTyping()) {
           if (action === 'up' || action === 'down') {
@@ -80,7 +89,7 @@ export function App() {
         }
         if (action === 'back') {
           const cur = focused();
-          const atTab = router.depth() === 1 && router.top().name !== 'account';
+          const atTab = router.depth() === 1;
           if (leavingRef.current) setLeaving(false);
           // On a tab, Back goes up to the nav first (like tvOS), then asks before leaving.
           else if (atTab && !(cur && cur.closest('.k-nav'))) focus(document.querySelector('.k-nav .k-tab.on') as HTMLElement | null);
@@ -148,6 +157,18 @@ export function App() {
     else refocus();
   }, [leaving]);
 
+  // hls.js loads while the person browses, so Play doesn't wait for it.
+  useEffect(() => {
+    loadHls();
+  }, []);
+
+  // Back from the player: focus returns to the screen as it was.
+  const wasPlaying = useRef(!!playing);
+  useEffect(() => {
+    if (wasPlaying.current && !playing) setTimeout(() => refocus(), 0);
+    wasPlaying.current = !!playing;
+  }, [playing]);
+
   const tab = route.name === 'home' || route.name === 'search' || route.name === 'schedule' || route.name === 'library';
 
   // The nav tucks away while the page is scrolled down; focusing it brings the page back to the top.
@@ -175,8 +196,11 @@ export function App() {
 
   return (
     <div ref={root} style={{ position: 'absolute', left: 0, top: 0, width: 1920, height: 1080 }}>
-      <Screen key={key} route={route} />
-      {tab ? <Nav active={route.name} hidden={navHidden} /> : null}
+      <div style={{ display: playing ? 'none' : 'block' }}>
+        <Screen key={key} route={route} />
+        {tab ? <Nav active={route.name} hidden={navHidden} /> : null}
+      </div>
+      {playing ? <Player key={playing.episode.id} playing={playing} /> : null}
       {updated ? (
         <div className="k-updated">
           <Fox size={34} />
@@ -212,8 +236,6 @@ function Screen({ route }: { route: Route }) {
       return <Schedule />;
     case 'library':
       return <Library />;
-    case 'account':
-      return <Account />;
     case 'show':
       return <ShowScreen id={route.id} />;
     case 'genre':
@@ -223,9 +245,8 @@ function Screen({ route }: { route: Route }) {
   }
 }
 
-/** Top bar: wordmark, the four tabs, and the anime.nexus account at the right. */
+/** Top bar: wordmark and the four tabs. */
 function Nav({ active, hidden }: { active: string; hidden: boolean }) {
-  const signedIn = useStore((s) => s.signedIn);
   const off = hidden ? { 'data-f-off': '' } : {};
   return (
     <div className={`k-nav${hidden ? ' hidden' : ''}`} data-g="nav">
@@ -246,11 +267,6 @@ function Nav({ active, hidden }: { active: string; hidden: boolean }) {
             {t.label}
           </div>
         ))}
-      </div>
-      <div className="k-acct" data-f="" {...off} data-k="nav:account" onClick={() => router.go({ name: 'account' })}>
-        <span className={`dot${signedIn ? ' on' : ''}`} />
-        <Icon name="accountCircleOutline" size={30} />
-        <span style={{ marginLeft: 10 }}>{signedIn ? 'Signed in' : 'Sign in'}</span>
       </div>
     </div>
   );

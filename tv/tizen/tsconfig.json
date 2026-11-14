@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2017",
-    "lib": ["DOM", "DOM.Iterable", "ES2017"],
+    "lib": ["DOM", "DOM.Iterable", "ES2017", "ES2019.String"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",

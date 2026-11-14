@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/immutability -- false positives: the React Compiler lint does not recognise preact/hooks' useRef, so it treats ref writes (even inside effects) as mutating a frozen hook value. */
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import type { Genre, Page, Show } from '@/lib/api';
+import type { Genre, Page, Show } from '@/lib/catalog';
 import { broadcastTime, WEEKDAYS } from '@/lib/format';
 import { imgUrl } from '@/lib/img';
 import { api, useData } from '../api';
@@ -153,7 +153,7 @@ export function Search() {
             <Spinner />
           </div>
         ) : null}
-        {source.error && !source.shows ? <div className="k-empty">Couldn’t reach anime.nexus. Try again in a moment.</div> : null}
+        {source.error && !source.shows ? <div className="k-empty">Couldn’t reach miruro.cx. Try again in a moment.</div> : null}
         <div style={{ height: 120 }} />
       </div>
     </div>
@@ -170,7 +170,7 @@ export function GenreScreen({ id, title }: { id: string; title: string }) {
           {shows.total ? <div className="t-body k-dim k-sub">{shows.total} shows</div> : null}
         </div>
         <Grid id="genre" shows={shows.shows} loading={shows.loading} onNearEnd={shows.more} />
-        {shows.error && !shows.shows ? <div className="k-empty">Couldn’t reach anime.nexus. Press Back and try again.</div> : null}
+        {shows.error && !shows.shows ? <div className="k-empty">Couldn’t reach miruro.cx. Press Back and try again.</div> : null}
         <div style={{ height: 120 }} />
       </div>
     </div>

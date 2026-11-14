@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'preact/hooks';
-import type { Episode, Show, Stats } from '@/lib/api';
+import type { Episode, Show, Stats } from '@/lib/catalog';
 import { clock, compact, minutes, year } from '@/lib/format';
 import { imgUrl } from '@/lib/img';
 import { api, useData } from '../api';

@@ -1,19 +1,18 @@
-import type { Show } from '@/lib/api';
+import type { Show } from '@/lib/catalog';
 import { imgUrl } from '@/lib/img';
 import { api, load } from './api';
 import { type EpisodeLite, lite, type Playing, resumePoint, session, type ShowLite, store } from './store';
 
 /**
- * Kitsune's own screens live on a plain anime.nexus page (robots.txt: same origin as the site, so the
- * catalog API and sign-in cookies work, but none of the site's scripts or ads). The module manifest's
- * websiteURL points here.
+ * Kitsune lives on a plain miruro.cx page (robots.txt: same origin as the site, so its API answers,
+ * but none of its scripts or ads). The module manifest's websiteURL points here, and the player is
+ * one more screen on the same page.
  */
 export const UI_PATH = '/robots.txt';
 
 export type Tab = 'home' | 'search' | 'schedule' | 'library';
 export type Route =
   | { name: Tab }
-  | { name: 'account' }
   | { name: 'show'; id: string }
   | { name: 'genre'; id: string; title: string };
 
@@ -34,14 +33,14 @@ export function parse(hash: string): Route {
   const [, a, b, c] = hash.replace(/^#/, '').split('/');
   if (a === 'show' && b) return { name: 'show', id: decodeURIComponent(b) };
   if (a === 'genre' && b) return { name: 'genre', id: decodeURIComponent(b), title: decodeURIComponent(c || '') };
-  if (a === 'search' || a === 'schedule' || a === 'library' || a === 'account') return { name: a };
+  if (a === 'search' || a === 'schedule' || a === 'library') return { name: a };
   return { name: 'home' };
 }
 
 /*
- * The back stack is ours, not the browser's: going to the player and back is a full page load, so the
- * stack is kept in sessionStorage and the URL is only ever replaced. That keeps the TV's history at
- * TizenBrew → Kitsune, so Back on Home leaves cleanly.
+ * The back stack is ours, not the browser's: it's kept in sessionStorage (so a reload for a
+ * Cloudflare check lands on the same screen) and the URL is only ever replaced. That keeps the TV's
+ * history at TizenBrew → Kitsune, so Back on Home leaves cleanly.
  */
 let stack: Route[] = initialStack();
 const subs = new Set<() => void>();
@@ -91,19 +90,6 @@ export const router = {
   },
 };
 
-/** Address of a Kitsune screen, for coming back from the player or the sign-in page. */
-export function uiUrl(r?: Route) {
-  return `${location.origin}${UI_PATH}#${format(r ?? router.top())}`;
-}
-
-/** Leave a site page (player, sign-in) for Kitsune's UI without adding to the TV's history. */
-export function backToUi(r?: Route) {
-  const saved = session.get<Route[]>('stack');
-  const target = r ?? (saved && saved.length ? saved[saved.length - 1] : { name: 'home' as const });
-  if (window.__kitsuneDev) return console.log('[dev] back to UI', format(target));
-  location.replace(`${location.origin}${UI_PATH}#${format(target)}`);
-}
-
 const previews = new Map<string, Show>();
 
 export function previewOf(id: string) {
@@ -115,22 +101,42 @@ export function openShow(show: Show | ShowLite) {
   router.go({ name: 'show', id: show.id });
 }
 
-export function watchUrl(ep: { id: string; slug: string }) {
-  return `/watch/${encodeURIComponent(ep.id)}/${encodeURIComponent(ep.slug)}`;
-}
+/*
+ * The player is a layer over the screens. What's playing is kept in sessionStorage too, so a reload
+ * comes back to the same episode.
+ */
+let current: Playing | null = session.get<Playing>('playing');
+const playerSubs = new Set<() => void>();
 
-/** Starts an episode in the site's own player page. */
+export const player = {
+  get: () => current,
+  subscribe(fn: () => void) {
+    playerSubs.add(fn);
+    return () => {
+      playerSubs.delete(fn);
+    };
+  },
+  open(p: Playing) {
+    current = p;
+    session.set('playing', p);
+    playerSubs.forEach((fn) => fn());
+  },
+  close() {
+    current = null;
+    session.set('playing', null);
+    playerSubs.forEach((fn) => fn());
+  },
+};
+
+/** Starts an episode in Kitsune's player. */
 export function playEpisode(show: Show | ShowLite, episode: EpisodeLite) {
   const s = lite(show);
   store.recordPlay(s, episode);
-  const playing: Playing = {
+  player.open({
     show: s,
     episode,
     thumb: imgUrl(episode.image, 'episode', '1280x720') ?? imgUrl(show.background ?? show.poster, 'background', '1920x1080'),
-  };
-  session.set('playing', playing);
-  if (window.__kitsuneDev) return console.log('[dev] play', watchUrl(episode));
-  location.replace(watchUrl(episode));
+  });
 }
 
 export async function findEpisode(showId: string, number: number) {
@@ -160,26 +166,4 @@ export async function playShow(show: Show | ShowLite) {
 
 export function resumeAt(episodeId: string) {
   return Math.floor(resumePoint(store.get().progress[episodeId]));
-}
-
-/**
- * Asks anime.nexus whether this TV is signed in (its API answers 401 to signed-out visitors), the same
- * check the phone's account screen makes.
- */
-export async function checkSignedIn(): Promise<boolean | null> {
-  const ask = (url: string) =>
-    fetch(url, { credentials: 'include', headers: { accept: 'application/json' } }).then(
-      (r) => r.status,
-      () => 0,
-    );
-  let status = await ask('/api/user/auth/providers');
-  if (status < 200 || status >= 300) {
-    const other = await ask('https://api.anime.nexus/api/user/auth/providers');
-    status = other >= 200 && other < 300 ? 200 : Math.max(status, other);
-  }
-  if (status === 200 || status === 401) {
-    store.setSignedIn(status === 200);
-    return status === 200;
-  }
-  return null;
 }

@@ -1,6 +1,6 @@
 import type { ComponentChildren, JSX } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
-import type { LatestItem, Show } from '@/lib/api';
+import type { LatestItem, Show } from '@/lib/catalog';
 import { audioLabel, minutes } from '@/lib/format';
 import { imgUrl } from '@/lib/img';
 import { openShow, playEpisode } from '../nav';

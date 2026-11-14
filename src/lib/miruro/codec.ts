@@ -74,6 +74,18 @@ export function encodeCatalog(gzipped: Uint8Array): Uint8Array {
 
 export type ProxyEnv = { a: string; b: string; key: string };
 
+// What the site shipped with at the time of writing; /env2.js is read for the current values.
+export const FALLBACK_ENV: ProxyEnv = { a: 'https://s1.keeply.top/', b: 'https://s2.keeply.top/', key: 'a54d389c18527d9fd3e7f0643e27edbe' };
+
+/** The stream proxy's hosts and key from the site's `/env2.js`, or the last known ones. */
+export function parseEnv(js: unknown): ProxyEnv {
+  const pick = (name: string) => (typeof js === 'string' ? js.match(new RegExp(`"${name}":"([^"]+)"`))?.[1] : undefined);
+  const a = pick('VITE_PROXY_A');
+  const b = pick('VITE_PROXY_B');
+  const key = pick('VITE_PROXY_OBF_KEY');
+  return a && key && /^[0-9a-f]+$/i.test(key) ? { a, b: b ?? a, key } : FALLBACK_ENV;
+}
+
 /** A server's `Referer` header, whatever its case. */
 export function refererOf(headers?: Record<string, string> | null): string | null {
   if (!headers) return null;

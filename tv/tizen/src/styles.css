@@ -44,10 +44,6 @@ html.k-ui body{color:#fff;font-family:"SamsungOne","Samsung Sans","SamsungOneUI"
 .k-tab.on:after{content:"";position:absolute;left:50%;bottom:4px;width:6px;height:6px;margin-left:-3px;border-radius:3px;background:#FF6B3D}
 .k-tab.f{background:#fff;color:#000;-webkit-transform:scale(1.06);transform:scale(1.06)}
 .k-tab.f:after{display:none}
-.k-acct{margin-left:auto;display:flex;align-items:center;height:56px;padding:0 24px 0 18px;border-radius:28px;background:rgba(255,255,255,.1);font-size:21px;font-weight:600;color:#D6D6DC;transition:transform .16s,background-color .16s,color .16s}
-.k-acct .dot{width:10px;height:10px;border-radius:5px;background:#6D6D77;margin-right:12px}
-.k-acct .dot.on{background:#3DDC84}
-.k-acct.f{background:#fff;color:#000;-webkit-transform:scale(1.06);transform:scale(1.06)}
 
 /* Buttons: translucent at rest, white when focused (the tvOS convention) */
 .k-btn{display:inline-flex;align-items:center;height:72px;padding:0 38px;margin-right:20px;border-radius:14px;background:rgba(255,255,255,.14);color:#fff;font-size:26px;font-weight:700;white-space:nowrap;transition:transform .16s cubic-bezier(.2,.7,.2,1),background-color .16s,color .16s}
@@ -177,9 +173,17 @@ html.k-ui body{color:#fff;font-family:"SamsungOne","Samsung Sans","SamsungOneUI"
 @-webkit-keyframes spin{to{-webkit-transform:rotate(360deg)}}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-/* Player overlay (sits above the site's pinned player, below the lifted verify box) */
-#kitsune-player{position:fixed;left:0;top:0;width:1920px;height:1080px;z-index:2147483646;pointer-events:none;-webkit-transform-origin:0 0;transform-origin:0 0;color:#fff;font-family:"SamsungOne","Samsung Sans","SamsungOneUI","TizenSans",Inter,Roboto,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
+/* Player (a layer over the screens, with its own <video>) */
+#kitsune-player{position:absolute;left:0;top:0;width:1920px;height:1080px;z-index:100;overflow:hidden;background:#000;color:#fff}
 #kitsune-player *{box-sizing:border-box}
+.p-video{position:absolute;left:0;top:0;z-index:0;width:100%;height:100%;background:#000;object-fit:contain}
+/* Everything over the picture gets its own layer, or a composited <video> can paint above it. */
+#kitsune-player>div{z-index:1}
+.p-subs{position:absolute;left:160px;right:160px;bottom:90px;text-align:center;white-space:pre-line;font-size:46px;line-height:60px;font-weight:600;color:#fff;text-shadow:0 0 6px #000,0 2px 4px #000,0 0 2px #000;-webkit-transition:bottom .28s;transition:bottom .28s;pointer-events:none}
+.p-subs.lifted{bottom:430px}
+.p-subs.top{top:70px;bottom:auto}
+.p-skip{position:absolute;right:96px;bottom:450px}
+.p-skip span{display:inline-block;padding:18px 32px;border-radius:40px;background:rgba(22,22,26,.92);border:2px solid rgba(255,255,255,.85);font-size:26px;font-weight:700}
 .p-fade{transition:opacity .28s}
 .p-hide{opacity:0}
 .p-osd{position:absolute;left:0;right:0;bottom:0;height:420px;padding:0 96px 64px;display:flex;flex-direction:column;justify-content:flex-end;background:linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.55) 40%,rgba(0,0,0,.9))}
