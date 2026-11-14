@@ -1,43 +1,44 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as BackgroundTask from 'expo-background-task';
 import * as Notifications from 'expo-notifications';
-import { AndroidImportance } from 'expo-notifications';
+import { AndroidImportance, SchedulableTriggerInputTypes } from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
 import { AppState, Platform } from 'react-native';
 import { api } from './api';
+import type { ScheduleRow } from './catalog';
 import { useStore } from './store';
 
 /**
  * Notifications: a new episode of a show in My List (or one watched lately), and a finished
- * download while Kitsune is in the background. New episodes are found by a background task the
- * system runs every so often (at least 30 minutes apart, when Android allows), which reads
- * anime.nexus's latest-episodes feed. Imported from the app's entry file (index.js), so the task is
- * defined even when Android starts Kitsune just to run it.
+ * download while Kitsune is in the background.
+ *
+ * miruro.cx only answers a browser, and Kitsune's browser tab exists only while the app runs, so
+ * nothing can check for new episodes in the background. Instead, whenever Kitsune is opened, it
+ * reads miruro's airing schedule (a week back, a week ahead): episodes that came out since last
+ * time are announced now, and the coming week's are scheduled to notify at their air time, so they
+ * arrive on time with Kitsune closed. Someone who doesn't open Kitsune for over a week stops
+ * getting them until they do.
  */
 
-const TASK = 'kitsune-new-episodes';
+// The background task from 1.2; kept defined (doing nothing) so Android finds code for it, and
+// unregistered below.
+const OLD_TASK = 'kitsune-new-episodes';
 const SEEN_KEY = 'kitsune-notify-seen';
 const EPISODES = 'new-episodes';
 const DOWNLOADS = 'downloads-done';
-// Shows watched within this long count as followed, as well as everything in My List.
 const RECENT = 45 * 24 * 60 * 60_000;
-const MAX_PER_RUN = 5;
+const MAX_NOW = 5;
+const MAX_SCHEDULED = 50;
 const FOREGROUND_GAP = 15 * 60_000;
+const AHEAD = 7 * 24 * 60 * 60_000;
 
-type Seen = { init: boolean; eps: Record<string, number> };
+type Seen = { init: boolean; eps: Record<string, number>; movedApplied?: boolean };
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false }),
 });
 
-TaskManager.defineTask(TASK, async () => {
-  try {
-    await checkNewEpisodes();
-    return BackgroundTask.BackgroundTaskResult.Success;
-  } catch {
-    return BackgroundTask.BackgroundTaskResult.Failed;
-  }
-});
+TaskManager.defineTask(OLD_TASK, async () => BackgroundTask.BackgroundTaskResult.Success);
 
 let channelsMade = false;
 async function channels() {
@@ -59,17 +60,15 @@ export async function allowNotifications(ask = true): Promise<boolean> {
   }
 }
 
-/** On app start: channels, and the background check registered or removed to match the setting. */
+/** On app start: channels; the old background check removed; alerts cleared if turned off. */
 export async function setupNotifications() {
   try {
     await channels();
-    const on = useStore.getState().prefs.notify;
-    const registered = await TaskManager.isTaskRegisteredAsync(TASK);
-    if (on && !registered) await BackgroundTask.registerTaskAsync(TASK, { minimumInterval: 30 });
-    if (!on && registered) await BackgroundTask.unregisterTaskAsync(TASK);
+    if (await TaskManager.isTaskRegisteredAsync(OLD_TASK)) await BackgroundTask.unregisterTaskAsync(OLD_TASK);
   } catch {
-    // Background tasks unavailable (e.g. a TV box without the services): checks still run in the app.
+    // Nothing to undo.
   }
+  if (!useStore.getState().prefs.notify) await cancelScheduled(new Set());
 }
 
 async function readSeen(): Promise<Seen> {
@@ -83,48 +82,102 @@ async function readSeen(): Promise<Seen> {
   return { init: false, eps: {} };
 }
 
-/**
- * Look at anime.nexus's latest episodes and notify for followed shows that moved on since last
- * time. The first look at a show only notes where it is, so following a show never sets off a
- * notification for an episode that's been out for days.
- */
-export async function checkNewEpisodes() {
-  if (!useStore.persist.hasHydrated()) await useStore.persist.rehydrate();
-  const { myList, history, prefs } = useStore.getState();
-  if (!prefs.notify) return;
-  const followed = new Map<string, string>();
-  for (const s of myList) followed.set(s.id, s.name);
-  const since = Date.now() - RECENT;
-  for (const h of Object.values(history)) if (h.at > since) followed.set(h.show.id, h.show.name);
-  if (!followed.size) return;
-
-  const latest = await api.latest();
-  const seen = await readSeen();
-  const fresh: { showId: string; name: string; number: number; title: string | null }[] = [];
-  for (const item of latest) {
-    if (!followed.has(item.id) || !item.episode) continue;
-    const n = item.episode.number;
-    const before = seen.eps[item.id];
-    if (before === undefined || n > before) {
-      seen.eps[item.id] = Math.max(n, before ?? 0);
-      if (seen.init && before !== undefined) fresh.push({ showId: item.id, name: item.name, number: n, title: item.episode.title });
+/** Scheduled episode alerts not in `keep` are cancelled. */
+async function cancelScheduled(keep: Set<string>) {
+  try {
+    for (const n of await Notifications.getAllScheduledNotificationsAsync()) {
+      if (n.identifier.startsWith('ep-') && !keep.has(n.identifier)) await Notifications.cancelScheduledNotificationAsync(n.identifier);
     }
-  }
-  seen.init = true;
-  await AsyncStorage.setItem(SEEN_KEY, JSON.stringify(seen));
-  if (!fresh.length || !(await allowNotifications(false))) return;
-  await channels();
-  for (const f of fresh.slice(0, MAX_PER_RUN)) {
-    await Notifications.scheduleNotificationAsync({
-      identifier: `ep-${f.showId}-${f.number}`,
-      content: { title: f.name, body: `Episode ${f.number}${f.title ? `  ·  ${f.title}` : ''} is out`, data: { showId: f.showId } },
-      trigger: Platform.OS === 'android' ? { channelId: EPISODES } : null,
-    });
+  } catch {
+    // Nothing scheduled.
   }
 }
 
+/** Shows someone follows: My List, and anything watched in the last 45 days. */
+function followed(): Map<string, string> {
+  const { myList, history } = useStore.getState();
+  const out = new Map<string, string>();
+  for (const s of myList) out.set(s.id, s.name);
+  const since = Date.now() - RECENT;
+  for (const h of Object.values(history)) if (h.at > since) out.set(h.show.id, h.show.name);
+  return out;
+}
+
+/** For each show and episode: when it's watchable (the sub release if there is one, else the broadcast). */
+function releases(rows: ScheduleRow[], ids: Map<string, string>) {
+  const best = new Map<string, ScheduleRow>();
+  for (const r of rows) {
+    if (!ids.has(r.anime_id) || r.track === 'dub') continue;
+    const key = `${r.anime_id}:${r.episode_number}`;
+    const had = best.get(key);
+    if (!had || (had.track !== 'sub' && r.track === 'sub')) best.set(key, r);
+  }
+  return [...best.values()];
+}
+
+/**
+ * Announce episodes that came out since last time, and schedule the coming week's. The first look
+ * at a show only notes where it is, so following a show never sets off an alert for an old episode.
+ */
+export async function checkNewEpisodes() {
+  if (!useStore.persist.hasHydrated()) await useStore.persist.rehydrate();
+  if (!useStore.getState().prefs.notify) return;
+  const ids = followed();
+  if (!ids.size) return cancelScheduled(new Set());
+
+  const rows = releases(await api.scheduleRows(), ids);
+  const now = Date.now();
+  const seen = await readSeen();
+  if (!seen.movedApplied) {
+    // Alerts saved before 1.3 were keyed by anime.nexus ids.
+    const moved = useStore.getState().moved;
+    for (const [old, id] of Object.entries(moved)) if (seen.eps[old] !== undefined) seen.eps[id] = Math.max(seen.eps[id] ?? 0, seen.eps[old]);
+    seen.movedApplied = true;
+  }
+
+  const fresh: { id: string; n: number }[] = [];
+  const out = new Map<string, number>();
+  for (const r of rows) if (Date.parse(r.air_at) <= now) out.set(r.anime_id, Math.max(out.get(r.anime_id) ?? 0, r.episode_number));
+  for (const [id, n] of out) {
+    const before = seen.eps[id];
+    if (before === undefined || n > before) {
+      if (seen.init && before !== undefined) fresh.push({ id, n });
+      seen.eps[id] = Math.max(n, before ?? 0);
+    }
+  }
+  // Shows followed that have nothing in this week's schedule still get their first look noted.
+  for (const id of ids.keys()) if (seen.eps[id] === undefined) seen.eps[id] = 0;
+  seen.init = true;
+  await AsyncStorage.setItem(SEEN_KEY, JSON.stringify(seen));
+
+  const allowed = await allowNotifications(false);
+  if (!allowed) return;
+  await channels();
+  for (const f of fresh.slice(0, MAX_NOW)) {
+    await Notifications.scheduleNotificationAsync({
+      identifier: `now-${f.id}-${f.n}`,
+      content: { title: ids.get(f.id) ?? 'New episode', body: `Episode ${f.n} is out`, data: { showId: f.id } },
+      trigger: Platform.OS === 'android' ? { channelId: EPISODES } : null,
+    });
+  }
+
+  // The coming week, at each episode's release time.
+  const keep = new Set<string>();
+  const ahead = rows.filter((r) => Date.parse(r.air_at) > now + 60_000 && Date.parse(r.air_at) < now + AHEAD).sort((a, b) => Date.parse(a.air_at) - Date.parse(b.air_at));
+  for (const r of ahead.slice(0, MAX_SCHEDULED)) {
+    const identifier = `ep-${r.anime_id}-${r.episode_number}`;
+    keep.add(identifier);
+    await Notifications.scheduleNotificationAsync({
+      identifier,
+      content: { title: ids.get(r.anime_id) ?? 'New episode', body: `Episode ${r.episode_number} should be out now`, data: { showId: r.anime_id } },
+      trigger: { type: SchedulableTriggerInputTypes.DATE, date: new Date(r.air_at), ...(Platform.OS === 'android' ? { channelId: EPISODES } : {}) },
+    });
+  }
+  await cancelScheduled(keep);
+}
+
 let lastForegroundCheck = 0;
-/** While Kitsune is open: check now and then too (the background task may be held back by Android). */
+/** While Kitsune is open: check now and then (at start and whenever it comes back). */
 export function checkSoon() {
   if (Date.now() - lastForegroundCheck < FOREGROUND_GAP) return;
   lastForegroundCheck = Date.now();

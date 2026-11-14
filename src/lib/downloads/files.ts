@@ -1,6 +1,6 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import type { Cue } from '../subtitles';
-import type { DownloadItem } from './store';
+import { type DownloadItem, useDownloads } from './store';
 
 /**
  * Where downloads live on the device:
@@ -22,8 +22,13 @@ export function safeId(id: string) {
   return id.replace(/[^A-Za-z0-9_-]/g, '_');
 }
 
-export function dirFor(id: string) {
-  return new Directory(downloadsRoot(), safeId(id));
+/** An item's folder name: its own (`dir`, kept from before 1.3) or one made from its id. */
+export function dirName(id: string) {
+  return useDownloads.getState().items[id]?.dir ?? safeId(id);
+}
+
+export function dirFor(id: string, dir?: string) {
+  return new Directory(downloadsRoot(), dir ?? dirName(id));
 }
 
 export function ensureDir(dir: Directory) {
@@ -55,9 +60,10 @@ export function readCues(id: string, index: number): Cue[] {
   }
 }
 
-export function removeFiles(id: string) {
+/** Pass `dir` when the item may already be gone from the store (its folder can't be looked up then). */
+export function removeFiles(id: string, folder?: string) {
   try {
-    const dir = dirFor(id);
+    const dir = dirFor(id, folder);
     if (dir.exists) dir.delete();
   } catch {
     // Already gone.
@@ -92,7 +98,7 @@ export function orphans(known: Set<string>): Directory[] {
   try {
     const root = downloadsRoot();
     if (!root.exists) return [];
-    const safeKnown = new Set([...known].map(safeId));
+    const safeKnown = new Set([...known].map(dirName));
     return root.list().filter((e): e is Directory => e instanceof Directory && !safeKnown.has(e.name));
   } catch {
     return [];

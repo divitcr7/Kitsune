@@ -34,7 +34,9 @@ export function Tabs({
 
   return (
     <View style={styles.wrap} onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}>
-      <Row destinations={chosen ? [chosen] : undefined} style={styles.row}>
+      {/* `destinations` is a TV focus-guide prop: a plain View would pass the element itself to
+          native code (and crash), so phones don't get it. */}
+      <Row {...(isTV && chosen ? { destinations: [chosen] } : {})} style={styles.row}>
         {items.map((it, i) => (
           <Pressable
             key={it.key}

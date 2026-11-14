@@ -1,7 +1,7 @@
 # Kitsune
 
-An Android client with its own native UI over [anime.nexus](https://anime.nexus)'s catalog API, and
-episodes streamed from [miruro.cx](https://www.miruro.cx) into the app's own native player. One Expo /
+An Android client with its own native UI over [miruro.cx](https://www.miruro.cx)'s catalog, with
+episodes streamed from miruro.cx into the app's own native player. One Expo /
 React Native app (TypeScript, `react-native-tvos`) ships as a single APK for Android phones and
 Android TV; `tv/tizen` is a separate Samsung TV build (Preact, a TizenBrew module) that still uses
 anime.nexus's player through the page scripts in `src/lib/inject.ts`.
@@ -39,7 +39,9 @@ src/components/MiruroBridge.tsx  the hidden miruro.cx tab; shown only for a Clou
 src/lib/miruro/bridge.ts  request queue between the app and that tab
 src/lib/miruro/codec.ts   response decoding and the stream proxy's URL scheme (pure)
 src/lib/miruro/api.ts     miruro.cx API calls and types
-src/lib/miruro/score.ts, match.ts  anime.nexus show -> AniList id -> miruro id
+src/lib/catalog.ts        miruro's catalog in the app's shapes (Show, Episode, Page); createCatalog(get)
+src/lib/migrate.ts, migrateRun.ts  moving data saved before 1.3 (anime.nexus ids) onto miruro ids
+src/lib/miruro/title.ts   title normalising for that move
 src/lib/miruro/streams.ts ranking an episode's streams, probing them (pure apart from probe)
 src/lib/miruro/resolve.ts everything the player needs for one episode
 src/lib/miruro/subs.ts    fetching a subtitle file from where the site would
@@ -54,7 +56,7 @@ index.js                  app entry: defines background tasks, then loads expo-r
 src/lib/inject.ts        script strings: the bridge's, and the anime.nexus ones the Tizen module uses
 src/lib/player.ts        zustand store for the one player session
 src/lib/nav.ts           playEpisode, preloadEpisode (a data prefetch), upNext, openShow
-src/lib/api.ts, queries.ts  catalog API (api.anime.nexus) and miruro queries via TanStack Query
+src/lib/api.ts, queries.ts  `api` = createCatalog(bridge), and every query via TanStack Query
 src/lib/store.ts         persisted list, history, progress, show links, sub/dub prefs (AsyncStorage)
 src/lib/tv.ts            isTV and TV sizing helpers
 src/lib/updates.ts       in-app updates from GitHub releases
@@ -68,13 +70,10 @@ scripts/                 build-apk.sh, check-player-script.mjs, check-miruro.mjs
 ## How playback works
 
 1. `playEpisode` (`src/lib/nav.ts`) opens a session in `usePlayer`; `PlayerHost` renders `Player`.
-   Ids, history and progress stay anime.nexus's; miruro is only where the video comes from.
-2. `resolveEpisode` (`lib/miruro/resolve.ts`):
-   - links the show (`match.ts`): AniList's public GraphQL search by title, scored on year, format
-     and episode count (`score.ts`; needs ≥ 70 and a 10-point lead), then
-     `/api/v1/anime?anilist_id_in=<id>&limit=100`. Links are persisted in `store.links`.
-   - maps the episode number (lining up first episodes when one side counts on from a season
-     before), then `/api/v1/anime/<id>/episodes/<n>/play`, with `/api/config` and `/env2.js`.
+   Show ids are miruro's; episode ids are `${showId}:${number}` (miruro's episodes have no ids).
+2. `resolveEpisode` (`lib/miruro/resolve.ts`): the show's episode list (skip times),
+   `/api/v1/anime/<id>/episodes/<n>/play`, `/api/config` and `/env2.js`. Shows are miruro's
+   already, so nothing needs matching.
 3. `candidates` (`streams.ts`) ranks streams: miruro's `providerOrder` (visible providers only), the
    provider's `variantOrder` within the sub/dub preference (`ssub` = clean video + subtitle files,
    `sub` = burned in), proxy URL first where the provider is proxied, then the stream direct with its
@@ -84,6 +83,23 @@ scripts/                 build-apk.sh, check-player-script.mjs, check-miruro.mjs
    retries the same stream once from where it was.
 5. While playing: subtitle files are fetched and drawn as an overlay, `skip_times` give the skip
    pill, progress is saved every 5 s, and the end of an episode moves on to the next.
+
+### The catalog
+
+`lib/catalog.ts` maps miruro's catalog into the shapes the screens use, so the UI didn't change:
+home rails (trending now, the season's list, coming soon, top movies, all-time), search and genres
+(cursor paging; `enc()` escapes `! ' ( ) * ~` because the bridge only passes plain characters),
+one schedule request (a week back and ahead) for New Episodes, the Schedule tab and alerts, show
+details and episodes (specials numbered 20001+ and episodes not aired yet are left out).
+
+### Data saved before 1.3
+
+Store v4 / downloads v2 moved anime.nexus ids onto miruro's (`lib/migrate.ts`, pure, tested):
+shows played before had a `links` entry and move exactly with their progress; the rest sit in
+`pending` and `migrateRun.ts` finds them by exact title on miruro, five a launch; what it can't is
+listed in My Stuff ("From the old catalog"). Downloads keep their folder (`dir`); unmovable ones
+are `legacy` (they play offline but don't write history). Raw backups: `kitsune-store-v3-backup`,
+`kitsune-downloads-v1-backup`.
 
 The miruro catalog only answers the exact query shapes its site sends ("Unsupported catalog
 request" otherwise; e.g. `limit=100` works for the AniList lookup and 50 doesn't). Keep the paths in
@@ -128,11 +144,14 @@ at a few hours a day (`onTimeout` stops it); a killed process resumes on the nex
 
 ### Notifications
 
-`src/lib/notify.ts` (expo-notifications, expo-background-task): a background task (every 30
-minutes at best, when Android allows) reads anime.nexus's latest-episodes feed and notifies for
-shows in My List or watched in the last 45 days, noting the first sighting of a show without
-notifying. Also a "downloaded" notification while Kitsune is in the background. A tap opens the
-show (or Downloads). `index.js` is the app entry so these tasks are defined before the router.
+`src/lib/notify.ts` (expo-notifications): miruro only answers a browser and the bridge tab exists
+only while Kitsune runs, so nothing checks in the background. Whenever Kitsune opens (and on
+resume, 15 minutes apart) it reads miruro's schedule (a week back, a week ahead) for shows in My
+List or watched in the last 45 days: episodes out since last time notify now, and the coming
+week's are scheduled as date-triggered notifications at their release time (`ep-<id>-<n>`, up to
+50, the rest cancelled). The first sighting of a show is only noted. Also a "downloaded"
+notification while Kitsune is in the background; a tap opens the show (or Downloads). The 1.2
+background task is unregistered (and kept defined as a no-op). `index.js` is the app entry.
 
 ### The bridge
 

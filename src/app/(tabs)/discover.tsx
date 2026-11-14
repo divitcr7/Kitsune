@@ -13,7 +13,7 @@ import { sized, T } from '@/components/T';
 import type { Show } from '@/lib/api';
 import { q } from '@/lib/queries';
 import { EDGE, isTV, tv, TV_NAV } from '@/lib/tv';
-import { useSignal } from '@/lib/ui';
+import { useSignal, useUi } from '@/lib/ui';
 import { PressableScale } from '@/components/PressableScale';
 import { color, radius, TAB_BAR_HEIGHT } from '@/theme/tokens';
 
@@ -45,6 +45,7 @@ export default function Discover() {
   }, [text]);
 
   useSignal('focus-search', () => setTimeout(() => input.current?.focus(), 280));
+  useSignal('search-preset', () => setText(useUi.getState().preset));
   useSignal('reselect:discover', () => {
     list.current?.scrollToOffset({ offset: 0, animated: true });
     input.current?.focus();
@@ -82,7 +83,7 @@ export default function Discover() {
       ) : null}
       <Appear key={searching ? 'r' : 'p'} distance={8}>
         <T variant="title" style={styles.gridTitle}>
-          {searching ? (results.data ? `${results.data.pages[0].meta.total} Results` : 'Searching…') : 'Popular This Week'}
+          {searching ? (results.data ? (results.data.pages[0].data.length ? 'Results' : 'No results') : 'Searching…') : 'Popular This Season'}
         </T>
       </Appear>
     </View>

@@ -34,6 +34,8 @@ export default function Home() {
   const seasonal = useQuery(q.seasonal);
   const trending = useQuery(q.trending);
   const recent = useQuery(q.recent);
+  const movies = useQuery(q.movies);
+  const allTime = useQuery(q.allTime);
 
   const history = useStore((s) => s.history);
   const continueWatching = useMemo(() => Object.values(history).sort((a, b) => b.at - a.at).slice(0, 12), [history]);
@@ -72,7 +74,7 @@ export default function Home() {
 
         {featured.isError && !featured.data ? (
           <View style={styles.error}>
-            <T variant="heading">Can’t reach Anime Nexus</T>
+            <T variant="heading">Can’t reach miruro.cx</T>
             <T variant="caption" dim style={{ marginTop: 6, textAlign: 'center' }}>
               {isTV ? 'Check your connection. Kitsune keeps trying.' : 'Check your connection and pull down to try again.'}
             </T>
@@ -91,7 +93,7 @@ export default function Home() {
         ) : null}
 
         <Rail
-          title="Top 10 Today"
+          title="Top 10 This Season"
           data={popular.data?.slice(0, 10)}
           keyOf={(s) => s.id}
           itemWidth={S.rankItem}
@@ -111,7 +113,7 @@ export default function Home() {
 
         <Rail
           title="Airing This Season"
-          data={seasonal.data?.slice(0, 24)}
+          data={seasonal.data?.slice(10, 34)}
           keyOf={(s) => s.id}
           itemWidth={S.poster}
           itemHeight={S.poster * 1.5}
@@ -128,8 +130,26 @@ export default function Home() {
         />
 
         <Rail
-          title="Recently Added"
+          title="Coming Soon"
           data={recent.data?.slice(0, 24)}
+          keyOf={(s) => s.id}
+          itemWidth={S.poster}
+          itemHeight={S.poster * 1.5}
+          render={(s) => <PosterCard show={s} width={S.poster} bare />}
+        />
+
+        <Rail
+          title="Top Movies"
+          data={movies.data}
+          keyOf={(s) => s.id}
+          itemWidth={S.poster}
+          itemHeight={S.poster * 1.5}
+          render={(s) => <PosterCard show={s} width={S.poster} bare />}
+        />
+
+        <Rail
+          title="All-Time Favorites"
+          data={allTime.data}
           keyOf={(s) => s.id}
           itemWidth={S.poster}
           itemHeight={S.poster * 1.5}

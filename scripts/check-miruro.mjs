@@ -13,8 +13,8 @@ const dir = mkdtempSync(join(tmpdir(), 'kitsune-check-'));
 const entry = join(dir, 'entry.ts');
 writeFileSync(
   entry,
-  ['codec', 'score', 'streams'].map((m) => `export * from ${JSON.stringify(join(root, 'src/lib/miruro', m))};`).join('\n') +
-    `\nexport * from ${JSON.stringify(join(root, 'src/lib/subtitles'))};\nexport * from ${JSON.stringify(join(root, 'src/lib/hls'))};\n`,
+  ['codec', 'title', 'streams'].map((m) => `export * from ${JSON.stringify(join(root, 'src/lib/miruro', m))};`).join('\n') +
+    `\nexport * from ${JSON.stringify(join(root, 'src/lib/catalog'))};\nexport * from ${JSON.stringify(join(root, 'src/lib/migrate'))};\nexport * from ${JSON.stringify(join(root, 'src/lib/subtitles'))};\nexport * from ${JSON.stringify(join(root, 'src/lib/hls'))};\n`,
 );
 const out = join(dir, 'bundle.mjs');
 await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', outfile: out, logLevel: 'error', nodePaths: [join(root, 'node_modules')] });
@@ -22,12 +22,17 @@ const m = await import(pathToFileURL(out).href);
 rmSync(dir, { recursive: true, force: true });
 
 let failed = 0;
+const pending = [];
 function check(name, fn) {
-  try {
-    fn();
-  } catch (e) {
+  const fail = (e) => {
     failed++;
     console.error(`✗ ${name}\n  ${e.message.split('\n').join('\n  ')}`);
+  };
+  try {
+    const r = fn();
+    if (r && typeof r.then === 'function') pending.push(r.catch(fail));
+  } catch (e) {
+    fail(e);
   }
 }
 
@@ -70,22 +75,95 @@ check('builds the stream proxy URL exactly as miruro.cx does (Referer value only
   assert.equal(m.refererOf(undefined), null);
 });
 
-const gachiakuta = { id: 178025, title: { romaji: 'Gachiakuta', english: 'Gachiakuta', native: 'ガチアクタ' }, synonyms: [], format: 'TV', startDate: { year: 2025 }, episodes: 24 };
-const sequel = { id: 999, title: { romaji: 'Gachiakuta Season 2', english: null, native: null }, synonyms: [], format: 'TV', startDate: { year: 2026 }, episodes: null };
+const fx = JSON.parse(readFileSync(join(root, 'scripts/fixtures/miruro-catalog.json'), 'utf8'));
 
-check('matches a show to the right AniList entry', () => {
-  const show = { name: 'Gachiakuta', type: 'TV', release_date: '2025-07-06', episode_count: 24 };
-  assert.equal(m.pick(show, [sequel, gachiakuta], 'Gachiakuta')?.id, 178025);
+check('maps a miruro show to the app’s shape', () => {
+  const s = m.toShow(fx.detail);
+  assert.equal(s.id, '60_lpgB8jXsPJPLmO-P-0gZF1-Wtpv-z');
+  assert.equal(s.name, 'Gachiakuta');
+  assert.equal(s.type, 'TV');
+  assert.equal(s.status, 'Finished Airing');
+  assert.equal(s.release_date, '2025-07-06');
+  assert.equal(s.premiered, 'summer');
+  assert.equal(s.episode_count_current, 24);
+  assert.equal(s.average.score, 8.2);
+  assert.equal(s.hasDub, true);
+  assert.equal(s.poster.original, fx.detail.cover_url);
+  assert.equal(s.background.original, fx.detail.background_url);
+  assert.equal(s.description, 'A boy lives in a floating town.\n\n(Source: Kodansha USA)');
+  assert.deepEqual(s.genres.map((g) => g.name), ['Action', 'Drama', 'Fantasy']);
+  const third = m.toShow(fx.search.data[1]);
+  assert.equal(third.name, 'Sousou no Frieren 3rd Season');
+  assert.equal(third.name_alt, '葬送のフリーレン 第3期');
+  assert.equal(third.status, 'Not yet aired');
+  assert.equal(third.average, null);
+  assert.equal(third.backdrop.original, fx.search.data[1].background_url);
 });
 
-check('keeps seasons apart', () => {
-  const show = { name: 'Gachiakuta Season 2', type: 'TV', release_date: '2026-01-10' };
-  assert.equal(m.pick(show, [gachiakuta, sequel], 'Gachiakuta Season 2')?.id, 999);
+check('pages search through miruro cursors, without adult titles', async () => {
+  const seen = [];
+  const cat = m.createCatalog(async (path) => {
+    seen.push(path);
+    return fx.search;
+  });
+  const p1 = await cat.shows({ search: "K-On! 'Hōkago'" });
+  assert.equal(p1.data.length, 2);
+  assert.equal(p1.next, fx.search.next_cursor);
+  await cat.shows({ search: 'frieren', cursor: p1.next });
+  assert.equal(seen[0], "/api/v1/anime?q=K-On%21%20%27H%C5%8Dkago%27&limit=15&sort=-popularity");
+  assert.ok(seen[1].endsWith(`&cursor=${fx.search.next_cursor}`));
+  await cat.shows({ genre: 'Slice of Life' });
+  assert.equal(seen[2], '/api/v1/anime?limit=15&genre_all=Slice%20of%20Life&sort=-popularity');
+  assert.ok(!/[!'()*~]/.test(seen.join('')));
 });
 
-check('refuses a weak match', () => {
-  const show = { name: 'Something Else Entirely', type: 'TV', release_date: '2019-01-01' };
-  assert.equal(m.pick(show, [gachiakuta, sequel], show.name), undefined);
+check('lists episodes in order, without specials', async () => {
+  const cat = m.createCatalog(async () => fx.episodes);
+  const asc = await cat.episodes('show1', 1, 'asc');
+  assert.deepEqual(asc.data.map((e) => e.number), [1, 2, 3]);
+  assert.equal(asc.data[0].id, 'show1:1');
+  assert.equal(asc.data[0].image.original, fx.episodes.data[1].thumbnail_url);
+  assert.equal(asc.data[2].title, null);
+  assert.equal(asc.data[2].is_filler, 1);
+  const desc = await cat.episodes('show1', 1, 'desc');
+  assert.deepEqual(desc.data.map((e) => e.number), [3, 2, 1]);
+  assert.equal(asc.meta.last_page, 1);
+});
+
+check('builds New Episodes and the week from one schedule', () => {
+  const shows = new Map([
+    ['5ofxv2OuOMRMLcVfPcjEXN7yll0geiKT', m.toShow({ ...fx.detail, id: '5ofxv2OuOMRMLcVfPcjEXN7yll0geiKT' })],
+    ['lfXi-EwSBvUjzgncPv5DAFbPdyII7xkb', m.toShow({ ...fx.search.data[0], id: 'lfXi-EwSBvUjzgncPv5DAFbPdyII7xkb' })],
+  ]);
+  const now = Date.parse('2026-11-14T12:00:00.000Z');
+  const latest = m.latestFrom(fx.schedule.data, shows, now);
+  // Newest first, one per show, sub release preferred over the raw broadcast.
+  assert.deepEqual(latest.map((l) => [l.id, l.episode.number]), [
+    ['lfXi-EwSBvUjzgncPv5DAFbPdyII7xkb', 7],
+    ['5ofxv2OuOMRMLcVfPcjEXN7yll0geiKT', 6],
+  ]);
+  assert.equal(latest[0].episode.id, 'lfXi-EwSBvUjzgncPv5DAFbPdyII7xkb:7');
+  const week = m.weekFrom(fx.schedule.data, shows, now);
+  assert.ok(week.length >= 2);
+  for (const s of week) {
+    assert.match(s.broadcast, /^\d\d:\d\d$/);
+    assert.ok(m.WEEKDAY_NAMES.includes(s.release_day));
+    assert.ok(s.airing.episode > 0);
+  }
+});
+
+check('knows the anime season', () => {
+  assert.deepEqual(m.seasonOf(new Date(2026, 10, 14)), { season: 'FALL', year: 2026 });
+  assert.deepEqual(m.seasonOf(new Date(2026, 11, 20)), { season: 'WINTER', year: 2027 });
+  assert.deepEqual(m.seasonOf(new Date(2027, 0, 5)), { season: 'WINTER', year: 2027 });
+  assert.deepEqual(m.seasonOf(new Date(2027, 3, 1)), { season: 'SPRING', year: 2027 });
+  assert.deepEqual(m.seasonOf(new Date(2027, 6, 1)), { season: 'SUMMER', year: 2027 });
+});
+
+check('compares titles for moving saved shows', () => {
+  assert.equal(m.normalize('Frieren: Beyond Journey’s End'), 'frieren beyond journey s end');
+  assert.ok(m.similarity('Kaiju No. 8', 'Kaiju No 8') > 0.9);
+  assert.notEqual(m.numbers('Spy x Family Season 3'), m.numbers('Spy x Family'));
 });
 
 const play = {
@@ -277,6 +355,73 @@ check('reads and rewrites media playlists for downloads', () => {
   assert.equal(m.parseMaster(lm, 'file:///d/master.m3u8').variants[0].uri, 'file:///d/video.m3u8');
 });
 
+check('moves saved data onto miruro ids without losing any', () => {
+  const show = (id, name) => ({ id, slug: id, name, poster: { resized: { '240x360': '/p.jpg' } } });
+  const ep = (id, number) => ({ id, slug: `e${number}`, number, title: `Ep ${number}`, duration: 1440 });
+  const v3 = {
+    myList: [show('nA', 'Alpha'), show('nB', 'Beta'), show('nC', 'Gamma')],
+    history: {
+      nA: { show: show('nA', 'Alpha'), episode: ep('eA5', 5), at: 100 },
+      nB: { show: show('nB', 'Beta'), episode: ep('eB2', 2), at: 200 },
+      nD: { show: show('nD', 'Delta'), episode: ep('eD9', 9), at: 300 },
+    },
+    progress: { eA5: { t: 300, d: 1440, at: 100 }, eB2: { t: 50, d: 1440, at: 200 }, eD9: { t: 10, d: 1440, at: 300 }, eA3dl: { t: 1440, d: 1440, at: 90 }, stray: { t: 1, d: 2, at: 1 } },
+    links: { nA: { anilist: 1, miruro: 'mA' }, nC: { anilist: 3, miruro: 'mC' } },
+    signedIn: true,
+    prefs: { audio: 'dub' },
+  };
+  const v4 = m.migrateStore(v3, [{ episodeId: 'eA3dl', showId: 'nA', number: 3 }]);
+  // Linked shows move; the rest wait in pending. Nothing is lost.
+  assert.deepEqual(v4.myList.map((s) => s.id), ['mA', 'mC']);
+  assert.deepEqual(Object.keys(v4.pending).sort(), ['nB', 'nD']);
+  assert.equal(v4.pending.nB.listIndex, 1);
+  assert.deepEqual(v4.pending.nB.history, { number: 2, title: 'Ep 2', at: 200, t: 50, d: 1440 });
+  assert.equal(v4.pending.nD.listIndex, null);
+  assert.equal(v4.myList.length + Object.values(v4.pending).filter((p) => p.listIndex !== null).length, v3.myList.length);
+  // Old artwork (anime.nexus) isn't carried; ids and episode keys are miruro's.
+  assert.equal(v4.myList[0].poster, undefined);
+  assert.equal(v4.history.mA.episode.id, 'mA:5');
+  assert.equal(v4.history.mA.show.name, 'Alpha');
+  assert.deepEqual(v4.progress['mA:5'], { t: 300, d: 1440, at: 100 });
+  assert.deepEqual(v4.progress['mA:3'], { t: 1440, d: 1440, at: 90 });
+  assert.deepEqual(v4.progress['mA:1'], { t: 1, d: 1, at: 100 });
+  assert.equal(v4.progress['mA:6'], undefined);
+  assert.equal(v4.progress.stray, undefined);
+  assert.deepEqual(v4.moved, { nA: 'mA', nC: 'mC' });
+  assert.equal('signedIn' in v4, false);
+  assert.deepEqual(v4.prefs, { audio: 'dub' });
+  // Running it again on its own output changes nothing important.
+  const again = m.migrateStore({ ...v4, links: { nA: { anilist: 1, miruro: 'mA' }, nC: { anilist: 3, miruro: 'mC' } } }, []);
+  assert.deepEqual(again.myList.map((s) => s.id), []);
+});
+
+check('moves downloads without moving their files', () => {
+  const s = (id) => ({ id, slug: id, name: id });
+  const e = (id, n) => ({ id, slug: String(n), number: n, title: null, duration: 1 });
+  const items = {
+    'e/1': { id: 'e/1', show: s('nA'), episode: e('e/1', 1), status: 'done' },
+    e2: { id: 'e2', show: s('nA'), episode: e('e2', 2), status: 'downloading', dir: 'kept' },
+    e9: { id: 'e9', show: s('nZ'), episode: e('e9', 9), status: 'queued' },
+    e8: { id: 'e8', show: s('nZ'), episode: e('e8', 8), status: 'done' },
+    dupe: { id: 'dupe', show: s('nA'), episode: e('dupe', 1), status: 'failed' },
+  };
+  const out = m.migrateDownloads(items, ['e/1', 'e2', 'e9', 'e8', 'dupe'], { nA: 'mA' });
+  assert.deepEqual(out.order, ['mA:1', 'mA:2', 'e9', 'e8', 'dupe']);
+  assert.equal(out.items['mA:1'].dir, 'e_1');
+  assert.equal(out.items['mA:2'].dir, 'kept');
+  assert.equal(out.items['mA:2'].show.id, 'mA');
+  assert.equal(out.items['mA:2'].episode.id, 'mA:2');
+  assert.equal(out.items.e9.status, 'failed');
+  assert.equal(out.items.e9.fail, 'unmatched');
+  assert.equal(out.items.e8.status, 'done');
+  assert.equal(out.items.e8.legacy, true);
+  assert.equal(out.items.dupe.legacy, true);
+  assert.equal(Object.keys(out.items).length, 5);
+  assert.ok(m.sameTitle('Frieren: Beyond Journey’s End', [null, 'Frieren - Beyond Journey’s End'], m.normalize));
+  assert.ok(!m.sameTitle('Frieren', ['Frieren Season 2'], m.normalize));
+});
+
+await Promise.all(pending);
 if (failed) {
   console.error(`${failed} miruro check${failed === 1 ? '' : 's'} failed`);
   process.exit(1);

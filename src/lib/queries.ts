@@ -2,7 +2,6 @@ import { infiniteQueryOptions, keepPreviousData, QueryClient, queryOptions } fro
 import { api } from './api';
 import * as miruro from './miruro/api';
 import { MiruroError } from './miruro/bridge';
-import { linkShow, UnmatchedError } from './miruro/match';
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -17,7 +16,6 @@ export const queryClient = new QueryClient({
 
 /** Retry a miruro.cx request only when another try could change the answer. */
 function noRetryWhenFinal(count: number, error: Error) {
-  if (error instanceof UnmatchedError) return false;
   if (error instanceof MiruroError && (error.kind === 'blocked' || error.kind === 'timeout' || (error.status >= 400 && error.status < 500))) return false;
   return count < 1;
 }
@@ -26,59 +24,62 @@ function noRetryWhenFinal(count: number, error: Error) {
 const persist = { persist: true };
 
 export const q = {
-  featured: queryOptions({ queryKey: ['featured'], queryFn: api.featured, meta: persist }),
-  popular: queryOptions({ queryKey: ['popular'], queryFn: api.popular, meta: persist }),
-  latest: queryOptions({ queryKey: ['latest'], queryFn: api.latest, meta: persist, staleTime: 2 * 60_000 }),
-  recent: queryOptions({ queryKey: ['recent'], queryFn: api.recent, meta: persist }),
-  seasonal: queryOptions({ queryKey: ['seasonal'], queryFn: api.seasonal, meta: persist }),
-  trending: queryOptions({
-    queryKey: ['discover', 'trending'],
-    queryFn: () => api.discover('trending', 1).then((r) => r.data),
-    meta: persist,
-  }),
-  schedule: queryOptions({ queryKey: ['schedule'], queryFn: api.schedule, meta: persist }),
-  genres: queryOptions({ queryKey: ['genres'], queryFn: api.genres, meta: persist, staleTime: 24 * 60 * 60_000 }),
+  featured: queryOptions({ queryKey: ['home', 'featured'], queryFn: ({ signal }) => api.featured(signal), meta: persist, staleTime: 10 * 60_000, retry: noRetryWhenFinal }),
+  popular: queryOptions({ queryKey: ['home', 'season'], queryFn: ({ signal }) => api.popular(signal), meta: persist, staleTime: 30 * 60_000, retry: noRetryWhenFinal }),
+  latest: queryOptions({ queryKey: ['home', 'latest'], queryFn: ({ signal }) => api.latest(signal), meta: persist, staleTime: 10 * 60_000, retry: noRetryWhenFinal }),
+  recent: queryOptions({ queryKey: ['home', 'upcoming'], queryFn: ({ signal }) => api.recent(signal), meta: persist, staleTime: 30 * 60_000, retry: noRetryWhenFinal }),
+  seasonal: queryOptions({ queryKey: ['home', 'season'], queryFn: ({ signal }) => api.seasonal(signal), meta: persist, staleTime: 30 * 60_000, retry: noRetryWhenFinal }),
+  trending: queryOptions({ queryKey: ['home', 'featured'], queryFn: ({ signal }) => api.trending(signal), meta: persist, staleTime: 10 * 60_000, retry: noRetryWhenFinal }),
+  movies: queryOptions({ queryKey: ['home', 'movies'], queryFn: ({ signal }) => api.movies(signal), meta: persist, staleTime: 60 * 60_000, retry: noRetryWhenFinal }),
+  allTime: queryOptions({ queryKey: ['home', 'allTime'], queryFn: ({ signal }) => api.allTime(signal), meta: persist, staleTime: 60 * 60_000, retry: noRetryWhenFinal }),
+  schedule: queryOptions({ queryKey: ['schedule'], queryFn: ({ signal }) => api.schedule(signal), meta: persist, staleTime: 15 * 60_000, retry: noRetryWhenFinal }),
+  genres: queryOptions({ queryKey: ['genres'], queryFn: () => api.genres(), staleTime: Infinity }),
 
-  show: (id: string) => queryOptions({ queryKey: ['show', id], queryFn: () => api.show(id) }),
-  stats: (id: string) => queryOptions({ queryKey: ['stats', id], queryFn: () => api.stats(id) }),
+  show: (id: string) => queryOptions({ queryKey: ['show', id], queryFn: ({ signal }) => api.show(id, signal), staleTime: 10 * 60_000, retry: noRetryWhenFinal }),
+  stats: (id: string) => queryOptions({ queryKey: ['stats', id], queryFn: ({ signal }) => api.stats(id, signal), staleTime: 10 * 60_000, retry: noRetryWhenFinal }),
   episodes: (id: string, page: number, order: 'asc' | 'desc') =>
     queryOptions({
       queryKey: ['episodes', id, page, order],
-      queryFn: () => api.episodes(id, page, order),
+      queryFn: ({ signal }) => api.episodes(id, page, order, 100, signal),
       placeholderData: keepPreviousData,
       staleTime: 2 * 60_000,
+      retry: noRetryWhenFinal,
     }),
 
   popularWeek: infiniteQueryOptions({
-    queryKey: ['discover', 'popular', 'week'],
-    queryFn: ({ pageParam }) => api.discover('popular', pageParam),
+    queryKey: ['discover', 'season'],
+    queryFn: ({ pageParam, signal }) => api.discover('popular', pageParam, signal),
     initialPageParam: 1,
     getNextPageParam: (last) => (last.meta.current_page < last.meta.last_page ? last.meta.current_page + 1 : undefined),
+    retry: noRetryWhenFinal,
   }),
 
+  // Search and genres page with miruro's cursors.
   search: (text: string) =>
     infiniteQueryOptions({
       queryKey: ['search', text],
-      queryFn: ({ pageParam, signal }) => api.shows({ search: text, page: pageParam }, signal),
-      initialPageParam: 1,
-      getNextPageParam: (last) => (last.meta.current_page < last.meta.last_page ? last.meta.current_page + 1 : undefined),
+      queryFn: ({ pageParam, signal }) => api.shows({ search: text, cursor: pageParam || undefined }, signal),
+      initialPageParam: '',
+      getNextPageParam: (last) => last.next,
       enabled: text.length > 1,
       placeholderData: keepPreviousData,
+      retry: noRetryWhenFinal,
+    }),
+
+  genre: (genre: string) =>
+    infiniteQueryOptions({
+      queryKey: ['genre', genre],
+      queryFn: ({ pageParam, signal }) => api.shows({ genre, cursor: pageParam || undefined }, signal),
+      initialPageParam: '',
+      getNextPageParam: (last) => last.next,
+      retry: noRetryWhenFinal,
     }),
 
   // ---- miruro.cx, for playback (see lib/miruro) ----
   miruroConfig: queryOptions({ queryKey: ['miruro', 'config'], queryFn: ({ signal }) => miruro.config(signal), staleTime: 30 * 60_000, retry: noRetryWhenFinal }),
   miruroEnv: queryOptions({ queryKey: ['miruro', 'env'], queryFn: ({ signal }) => miruro.env(signal), staleTime: 24 * 60 * 60_000, retry: noRetryWhenFinal }),
-  link: (showId: string) =>
-    queryOptions({
-      queryKey: ['miruro', 'link', showId],
-      queryFn: async ({ signal }) => linkShow(await queryClient.fetchQuery(q.show(showId)), signal),
-      staleTime: Infinity,
-      gcTime: 60 * 60_000,
-      retry: noRetryWhenFinal,
-    }),
   miruroEpisodes: (id: string) =>
-    queryOptions({ queryKey: ['miruro', 'episodes', id], queryFn: ({ signal }) => miruro.episodes(id, signal), staleTime: 10 * 60_000, retry: noRetryWhenFinal }),
+    queryOptions({ queryKey: ['miruro', 'episodes', id], queryFn: ({ signal }) => api.episodeRows(id, signal), staleTime: 10 * 60_000, retry: noRetryWhenFinal }),
   // Stream URLs carry tokens that expire, so play info is short-lived.
   play: (id: string, episode: number) =>
     queryOptions({
@@ -89,11 +90,4 @@ export const q = {
       retry: noRetryWhenFinal,
     }),
 
-  genre: (genreId: string) =>
-    infiniteQueryOptions({
-      queryKey: ['genre', genreId],
-      queryFn: ({ pageParam }) => api.shows({ genre: genreId, page: pageParam }),
-      initialPageParam: 1,
-      getNextPageParam: (last) => (last.meta.current_page < last.meta.last_page ? last.meta.current_page + 1 : undefined),
-    }),
 };

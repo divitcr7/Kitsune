@@ -71,7 +71,7 @@
 
 ## Why Kitsune
 
-Anime sites have the shows. What they don't have is an app that respects your time: no popups, no fake download buttons, no new tabs opening themselves, no waiting around for the video. Kitsune gives you a clean, cinematic UI for browsing (the catalog comes from anime.nexus) and plays every episode in its own native player from miruro.cx's streams. No website is ever loaded to play a video, so there's nothing to show you ads.
+Anime sites have the shows. What they don't have is an app that respects your time: no popups, no fake download buttons, no new tabs opening themselves, no waiting around for the video. Kitsune gives you a clean, cinematic UI over miruro.cx's catalog and plays every episode in its own native player from miruro.cx's streams. No website is ever loaded to play a video, so there's nothing to show you ads.
 
 No accounts. No analytics. No trackers. Your list, history and downloads stay on your device.
 
@@ -163,9 +163,9 @@ Samsung TVs (Tizen) get Kitsune as a [TizenBrew](https://github.com/reisxd/Tizen
 
 **A Cloudflare page ("Just a moment…" or "Verify you are human") before the episode.** miruro.cx has Cloudflare check connections now and then. Kitsune shows the check as it is: most of the time it passes by itself after a few seconds, sometimes it needs a tap on the box (on a TV: OK on the remote). Then the episode plays. Kitsune never opens your browser by itself.
 
-**"Couldn't find this show on miruro.cx".** Kitsune finds each anime.nexus show on miruro.cx by matching its title and year on AniList, and this one didn't match closely enough to be sure. Other shows still play.
+**"From the old catalog" in My Stuff.** Shows saved before 1.3 (when the catalog came from anime.nexus) are moved onto miruro.cx automatically. The few Kitsune can't be sure about are listed there: tap one to search for it, or remove it.
 
-**"Episode N isn't on miruro.cx yet".** The episode is out on anime.nexus but miruro.cx hasn't listed it. New episodes usually appear there within a few hours.
+**"Episode N isn't on miruro.cx yet".** miruro.cx hasn't got that episode yet. New episodes usually appear within a few hours of airing.
 
 **"No working stream for this episode".** Kitsune tried every stream miruro.cx offered and none started. That's usually temporary: wait a minute and tap **Try again**. If the other language has streams, **Play the dub** / **Play subbed** is right there.
 
@@ -175,7 +175,7 @@ Samsung TVs (Tizen) get Kitsune as a [TizenBrew](https://github.com/reisxd/Tizen
 
 **Downloads in the background.** Downloads keep going when you leave Kitsune or turn the screen off, with a "Downloading" notification showing progress (allow notifications to see it). If Android closes Kitsune anyway (or after a few hours on Android 15), open it again and the queue carries on from the last saved piece; nothing is downloaded twice.
 
-**No new-episode notifications.** Allow notifications for Kitsune, and check My Stuff → Notifications is on. Android decides when background checks run (usually within an hour); battery savers can delay them.
+**No new-episode notifications.** Allow notifications for Kitsune, and check My Stuff → Notifications is on. Alerts are set up from miruro's schedule whenever Kitsune is opened, a week ahead, so open it at least once a week to keep them coming.
 
 **A download says "Not enough free space" or "This stream can't be saved".** Free some space and tap it to try again. A stream miruro.cx serves encrypted can't be saved; streaming it still works.
 
@@ -188,12 +188,11 @@ Samsung TVs (Tizen) get Kitsune as a [TizenBrew](https://github.com/reisxd/Tizen
 ```
  ┌───────────────────────────── Kitsune ─────────────────────────────┐
  │                                                                   │
- │  React Native UI ──► anime.nexus catalog API (public JSON)        │
- │   home · search · schedule · show pages · images (AVIF via CDN)   │
+ │  React Native UI ──► miruro.cx catalog API, asked from a hidden   │
+ │   in-app browser tab on the site (robots.txt: none of its scripts)│
+ │   home · search · schedule · show pages · episodes                │
  │                                                                   │
- │  Play ──► show matched on AniList (title, year, format)           │
- │       ──► miruro.cx API, asked from a hidden in-app browser tab   │
- │           on the site (robots.txt: none of the site's scripts)    │
+ │  Play ──► miruro.cx play API through the same tab                 │
  │       ──► episode streams ranked; native player (ExoPlayer) tries │
  │           them in turn until one plays                            │
  │       ──► Kitsune's own controls, subtitles and skip-intro on top │
@@ -202,8 +201,8 @@ Samsung TVs (Tizen) get Kitsune as a [TizenBrew](https://github.com/reisxd/Tizen
  │               device; a foreground service keeps it going in the  │
  │               background; plays offline from the saved files      │
  │                                                                   │
- │  Alerts ──► a background check of the latest episodes for shows   │
- │             in My List or being watched                           │
+ │  Alerts ──► miruro's airing schedule, read when Kitsune opens;    │
+ │             the week's episodes notify at air time                │
  └───────────────────────────────────────────────────────────────────┘
 
  Android TV: the same app (React Native's TV fork), TV layouts when Platform.isTV.
@@ -255,7 +254,7 @@ Attach exactly one `.apk` to a release, named `Kitsune-vX.Y.Z.apk`. Phones and T
 | `src/lib/downloads/` | Download queue, engine and files; `background.ts` with `modules/kitsune-downloads` (the foreground service) |
 | `src/lib/notify.ts` | New-episode and finished-download notifications |
 | `src/lib/hls.ts`, `subtitles.ts` | HLS playlists (quality lock, downloads); VTT, SRT and ASS subtitles |
-| `src/lib/api.ts` | anime.nexus catalog API client and types |
+| `src/lib/catalog.ts`, `api.ts` | miruro.cx catalog: home rails, search, genres, schedule, shows and episodes |
 | `src/lib/updates.ts` | In-app updates from GitHub releases: check, download, verify, install |
 | `src/lib/tv.ts` | `isTV`, 10-foot sizing and overscan margins for the TV layouts |
 | `src/lib/store.ts` | My List, history, progress and player preferences (persisted on device) |
@@ -272,8 +271,7 @@ Attach exactly one `.apk` to a release, named `Kitsune-vX.Y.Z.apk`. Phones and T
 
 Kitsune stands on a lot of great work:
 
-- **[miruro.cx](https://www.miruro.cx)** for the streams, subtitles and skip times, and **[anime.nexus](https://anime.nexus)** for the catalog and artwork. Kitsune is an unofficial app and isn't affiliated with or endorsed by either.
-- **[AniList](https://anilist.co)** for its public API, which Kitsune uses to match shows between the two.
+- **[miruro.cx](https://www.miruro.cx)** for the catalog, streams, subtitles, schedule and skip times. Kitsune is an unofficial app and isn't affiliated with or endorsed by miruro.cx. Artwork comes from AniList and TMDB through miruro.
 - **[Expo](https://expo.dev)** and **[React Native](https://reactnative.dev)**, plus **[Software Mansion](https://swmansion.com)** for Reanimated, Gesture Handler, Screens and react-native-svg.
 - **[TanStack Query](https://tanstack.com/query)**, **[Zustand](https://github.com/pmndrs/zustand)** and **[react-native-webview](https://github.com/react-native-webview/react-native-webview)**.
 - **[react-native-tvos](https://github.com/react-native-tvos/react-native-tvos)** for TV focus and remote support, **[TizenBrew](https://github.com/reisxd/TizenBrew)** by reisxd for making Samsung TVs possible, and **[Preact](https://preactjs.com)**.
@@ -284,7 +282,7 @@ Kitsune stands on a lot of great work:
 
 ## Disclaimer
 
-Kitsune doesn't host, upload or rehost any content. The catalog is loaded from anime.nexus and episodes stream from miruro.cx's sources, the same as opening those sites in a browser. It's a personal, non-commercial project. If you love a show, support the official release.
+Kitsune doesn't host, upload or rehost any content. Shows and episodes are loaded from miruro.cx, the same as opening the site in a browser. It's a personal, non-commercial project. If you love a show, support the official release.
 
 ## Say hi
 

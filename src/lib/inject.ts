@@ -629,7 +629,12 @@ true;`;
  * (decoding happens in the app). Only `/api/...` and `/env2.js` may be asked for.
  */
 export const bridgeScript = `(function () {
-  if (window.__kitsuneBridge) return;
+  // Injected again at every load step: say "ready" again too, in case the app missed it the first
+  // time (a message posted before the app is listening is lost).
+  if (window.__kitsuneBridge) {
+    if (window.__kitsuneApi) { try { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'bridge' })); } catch (e) {} }
+    return;
+  }
   window.__kitsuneBridge = 1;
 ${GATE}
   gate(function () {
@@ -653,7 +658,7 @@ ${GATE}
     x.ontimeout = x.onerror;
     x.send();
   };
-  post({ type: 'bridge' });
+  whenParsed(function () { post({ type: 'bridge' }); });
   });
 })();
 true;`;

@@ -45,7 +45,8 @@ function session(show: Show | ShowLite, episode: EpisodeLite): Session {
 }
 
 export function playEpisode(show: Show | ShowLite, episode: EpisodeLite) {
-  useStore.getState().recordPlay(lite(show), episode);
+  // A download from before 1.3 that couldn't be moved (old id, no ':') plays, but isn't history.
+  if (episode.id.includes(':')) useStore.getState().recordPlay(lite(show), episode);
   haptics.impact();
   usePlayer.getState().open(session(show, episode));
 }

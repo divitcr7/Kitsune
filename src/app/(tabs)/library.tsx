@@ -16,13 +16,14 @@ import { useTabScroll } from '@/components/TabBarContext';
 import { TopBar } from '@/components/TopBar';
 import { T } from '@/components/T';
 import { useDownloadLive, useDownloads } from '@/lib/downloads/store';
-import { allowNotifications, setupNotifications } from '@/lib/notify';
+import { allowNotifications, checkNewEpisodes, setupNotifications } from '@/lib/notify';
 import type { Show } from '@/lib/api';
 import { formatBytes, minutes, timeAgo } from '@/lib/format';
 import { art } from '@/lib/img';
 import { openShow, playEpisode } from '@/lib/nav';
 import { fraction, type HistoryEntry, useStore } from '@/lib/store';
 import { EDGE, isTV, rowFocus, tv, TV_NAV } from '@/lib/tv';
+import { useUi } from '@/lib/ui';
 import { appVersion, useUpdates } from '@/lib/updates';
 import { color, radius, TAB_BAR_HEIGHT } from '@/theme/tokens';
 
@@ -124,14 +125,14 @@ export default function Library() {
           <Empty icon="history" text="Everything you watch shows up here, so you can jump right back in." />
         )}
 
+        <OldCatalog />
+
         <Header title="Downloads" />
         <DownloadsRow />
 
         <Header title="Notifications" />
         <NotifyRow />
 
-        <Header title="Account" />
-        <AccountRow />
 
         <About />
       </Animated.ScrollView>
@@ -237,6 +238,45 @@ function Empty({ icon, text }: { icon: 'history' | 'plus'; text: string }) {
   );
 }
 
+/**
+ * Shows saved before 1.3 that Kitsune couldn't find on miruro.cx by themselves (they're looked for
+ * by exact title a few at a time). Search opens them by name; Remove lets them go.
+ */
+function OldCatalog() {
+  const pending = useStore((s) => s.pending);
+  const { switchTab } = useTabTrigger({ name: 'discover' });
+  const list = Object.entries(pending).sort((a, b) => (b[1].history?.at ?? 0) - (a[1].history?.at ?? 0));
+  if (!list.length) return null;
+  const searching = list.some(([, p]) => p.tries < 3);
+  return (
+    <>
+      <Header title="From the old catalog" count={list.length} />
+      <T variant="caption" faint style={[styles.pad, { marginTop: -4, marginBottom: 8 }]}>
+        {searching ? 'Kitsune is finding these on miruro.cx. ' : ''}Search for one to watch it, or remove it.
+      </T>
+      {list.map(([id, p]) => (
+        <View key={id} style={[styles.pad, styles.account, { marginBottom: 10 }]}>
+          <Pressable
+            style={({ pressed, focused }) => [{ flex: 1 }, pressed && { opacity: 0.6 }, focused && rowFocus]}
+            onPress={() => {
+              switchTab('discover', {});
+              setTimeout(() => useUi.getState().searchFor(p.name), 50);
+            }}
+          >
+            <T variant="heading" numberOfLines={1}>
+              {p.name}
+            </T>
+            <T variant="caption" faint style={{ marginTop: 2 }}>
+              {p.history ? `Episode ${p.history.number}  ·  Search` : 'Search'}
+            </T>
+          </Pressable>
+          <IconButton icon="close" label={`Remove ${p.name}`} tint={color.textFaint} onPress={() => useStore.getState().patchPending(id, null)} />
+        </View>
+      ))}
+    </>
+  );
+}
+
 function DownloadsRow() {
   const items = useDownloads((s) => s.items);
   const live = useDownloadLive((s) => (s.id && s.total ? s.done / s.total : null));
@@ -274,7 +314,8 @@ function NotifyRow() {
       // Still turned on: the alerts appear once notifications are allowed in Android's settings.
     }
     useStore.getState().setPrefs({ notify: next });
-    setupNotifications();
+    await setupNotifications();
+    if (next) checkNewEpisodes().catch(() => {});
   }
   return (
     <Pressable onPress={toggle} style={({ pressed, focused }) => [styles.pad, styles.account, pressed && { opacity: 0.6 }, focused && styles.accountFocus]}>
@@ -282,26 +323,10 @@ function NotifyRow() {
       <View style={{ flex: 1 }}>
         <T variant="heading">New episode alerts</T>
         <T variant="caption" faint style={{ marginTop: 2 }}>
-          {on ? 'On  ·  for My List and shows you’re watching' : 'Off'}
+          {on ? 'On  ·  for My List and shows you’re watching, at air time' : 'Off'}
         </T>
       </View>
       <Icon name={on ? 'toggle-switch' : 'toggle-switch-off-outline'} size={36} tint={on ? color.accent : color.textFaint} />
-    </Pressable>
-  );
-}
-
-function AccountRow() {
-  const signedIn = useStore((s) => s.signedIn);
-  return (
-    <Pressable onPress={() => router.push('/account')} style={({ pressed, focused }) => [styles.pad, styles.account, pressed && { opacity: 0.6 }, focused && styles.accountFocus]}>
-      <Icon name="account-circle-outline" size={30} tint={color.text} />
-      <View style={{ flex: 1 }}>
-        <T variant="heading">anime.nexus account</T>
-        <T variant="caption" faint style={{ marginTop: 2 }}>
-          {signedIn ? 'Signed in  ·  manage or sign out' : 'Optional: episodes play without it'}
-        </T>
-      </View>
-      <Icon name="chevron-right" tint={color.textFaint} />
     </Pressable>
   );
 }
@@ -360,7 +385,7 @@ function About() {
         </>
       )}
       <T variant="caption" faint style={{ marginTop: 8, lineHeight: 18 }}>
-        The catalog comes from anime.nexus and episodes stream from miruro.cx, played in Kitsune’s own player. Kitsune isn’t affiliated with either site and hosts no content.
+        Shows and episodes come from miruro.cx and play in Kitsune’s own player. Kitsune isn’t affiliated with miruro.cx and hosts no content.
       </T>
     </View>
   );

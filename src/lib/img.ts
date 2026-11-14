@@ -1,9 +1,7 @@
 import type { ImageSource } from 'expo-image';
 import type { ImageSet } from './api';
 
-const CDN = 'https://anime.delivery';
-
-/** Size keys per artwork type, largest first. */
+/** Size keys per artwork type, largest first (the size asked for picks a smaller copy where a host has one). */
 export const SIZES = {
   poster: ['1560x2340', '640x960', '480x720', '240x360'],
   background: ['3840x2160', '1920x1080', '1360x768', '960x540'],
@@ -14,30 +12,33 @@ export const SIZES = {
 
 type Kind = keyof typeof SIZES;
 
-function pick(map: Record<string, string> | undefined, kind: Kind, size: string) {
-  if (!map) return undefined;
-  if (map[size]) return map[size];
-  const order = SIZES[kind] as readonly string[];
-  // Fall back to the nearest smaller size, then anything at all.
-  const i = order.indexOf(size);
-  for (const k of order.slice(Math.max(i, 0))) if (map[k]) return map[k];
-  return Object.values(map)[0];
+/**
+ * miruro's artwork is full-size: AniList covers and banners, and TMDB backdrops, logos and episode
+ * stills at their original size. TMDB serves smaller copies by path, which keeps rails light on
+ * phones and TV boxes; AniList's covers are already a sensible size.
+ */
+function sized(url: string, kind: Kind, size: string): string {
+  const m = url.match(/^(https:\/\/image\.tmdb\.org\/t\/p\/)original(\/.+)$/);
+  if (!m) return url;
+  const width = Number(size.split('x')[0]) || 0;
+  let w: string;
+  if (kind === 'logo') w = size === 'small' ? 'w300' : 'w500';
+  else if (width >= 1900) w = 'original';
+  else if (width >= 1200) w = 'w1280';
+  else if (width >= 700) w = 'w780';
+  else w = 'w500';
+  return `${m[1]}${w}${m[2]}`;
 }
 
 export function imgUrl(set: ImageSet | undefined, kind: Kind, size: string): string | undefined {
-  const path = pick(set?.resized, kind, size);
-  return path ? CDN + path : undefined;
+  return set?.original ? sized(set.original, kind, size) : undefined;
 }
 
-/** Image + blurred low-res placeholder, ready for expo-image's `source` / `placeholder`. */
+/** Image source for expo-image's `source` (miruro has no blurred placeholders). */
 export function art(set: ImageSet | undefined, kind: Kind, size: string) {
   const uri = imgUrl(set, kind, size);
-  const smallest = SIZES[kind][SIZES[kind].length - 1];
-  const blur = pick(set?.resized_blur, kind, smallest);
-  return {
-    source: uri ? ({ uri } satisfies ImageSource) : undefined,
-    placeholder: blur ? ({ uri: CDN + blur } satisfies ImageSource) : undefined,
-  };
+  return { source: uri ? ({ uri } satisfies ImageSource) : undefined, placeholder: undefined };
 }
 
-export const webUrl = (path: string) => `https://anime.nexus${path}`;
+/** A show's page on miruro.cx, for sharing. */
+export const showUrl = (id: string) => `https://www.miruro.cx/info/${id}`;

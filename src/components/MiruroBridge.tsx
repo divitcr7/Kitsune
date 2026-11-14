@@ -9,6 +9,7 @@ import {
   bridgeCheck,
   bridgeLoading,
   bridgeLost,
+  bridgeOffline,
   bridgeReady,
   bridgeResponse,
   useBridge,
@@ -30,11 +31,12 @@ const GATE_GRACE = 3500;
 const MAX_CHECKS = 4;
 
 /**
- * The app's hidden miruro.cx tab (see lib/miruro/bridge.ts). Mounted once something asks the API
- * for data. Invisible unless Cloudflare's check needs a person while an episode is waiting.
+ * The app's hidden miruro.cx tab (see lib/miruro/bridge.ts), open from launch: the catalog,
+ * playback and downloads all go through it. Invisible unless Cloudflare's check needs a person
+ * while something is waiting on the site.
  */
 export function MiruroBridge() {
-  // 'off' again only after the site couldn't be reached at all; the next request starts afresh.
+  // 'off' only after the site couldn't be reached at all; the next request opens the tab again.
   const state = useBridge((s) => s.state);
   return state === 'off' ? null : <Tab />;
 }
@@ -47,7 +49,9 @@ function Tab() {
   // never shown over browsing.
   const playing = usePlayer((s) => !!s.session);
   const asking = useDownloads((s) => !!s.asking);
-  const waiting = playing || asking;
+  // Browsing waits on miruro.cx too now: a check is shown whenever anything is waiting for it.
+  const queued = useBridge((s) => s.waiting > 0);
+  const waiting = playing || asking || queued;
   const [grace, setGrace] = useState(false);
   const shown = grace && state === 'check' && waiting;
   const checks = useRef(0);
@@ -147,6 +151,8 @@ function Tab() {
           domStorageEnabled
           overScrollMode="never"
           webviewDebuggingEnabled={__DEV__}
+          // Couldn't load the site at all (offline): fail what's waiting now rather than in 30 s.
+          onError={() => bridgeOffline()}
           onRenderProcessGone={() => {
             bridgeLost();
             web.current?.reload();

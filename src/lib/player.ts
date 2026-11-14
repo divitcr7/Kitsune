@@ -15,11 +15,8 @@ type State = {
   session: Session | null;
   /** true while the player is on screen (there's no hidden preloaded player any more). */
   visible: boolean;
-  /** Episode to pick back up once the user has signed in to anime.nexus. */
-  resume: Session | null;
   open: (s: Session) => void;
   close: () => void;
-  setResume: (s: Session | null) => void;
   /** miruro.cx refused a request: hold off on background lookups for a while. */
   backOff: () => void;
   /** Whether a background lookup may go now (and counts it if so). */
@@ -37,10 +34,8 @@ let quietUntil = 0;
 export const usePlayer = create<State>((set) => ({
   session: null,
   visible: false,
-  resume: null,
   open: (s) => set({ session: s, visible: true }),
   close: () => set({ session: null, visible: false }),
-  setResume: (resume) => set({ resume }),
   backOff: () => {
     quietUntil = Date.now() + BACKOFF;
   },

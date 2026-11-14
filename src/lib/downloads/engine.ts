@@ -4,14 +4,13 @@ import { localMaster, localMedia, type Media, type MediaPlaylist, parseMaster, p
 import { MiruroError, useBridge } from '../miruro/bridge';
 import { notifyDownloaded } from '../notify';
 import type { SkipTime } from '../miruro/api';
-import { UnmatchedError } from '../miruro/match';
 import { MissingEpisodeError, resolveEpisode } from '../miruro/resolve';
 import { type Candidate, candidates, defaultSubtitle, usableSubtitles } from '../miruro/streams';
 import { fetchCues } from '../miruro/subs';
 import { usePlayer } from '../player';
 import { queryClient, q } from '../queries';
 import { holdAwake, letGo, showProgress } from './background';
-import { dirFor, ensureDir, removeFiles, sizeOf, sweepParts } from './files';
+import { dirFor, dirName, ensureDir, removeFiles, sizeOf, sweepParts } from './files';
 import { type DownloadFail, type DownloadItem, type SavedSub, useDownloadLive, useDownloads } from './store';
 
 /**
@@ -106,10 +105,12 @@ export function kick() {
 /** Delete a download (stopping it first if it's the one running). */
 export function deleteDownload(id: string) {
   const isRunning = running?.id === id;
+  // The folder is looked up through the item, so note it before the item goes.
+  const folder = dirName(id);
   useDownloads.getState().remove(id);
   // The running one's files go once its transfer has stopped (see run()).
   if (isRunning) kick();
-  else removeFiles(id);
+  else removeFiles(id, folder);
 }
 
 /** After an app restart: tidy up half-written files and anything left from removed downloads. */
@@ -121,6 +122,7 @@ export function startup() {
 
 async function run(id: string, signal: AbortSignal) {
   const store = useDownloads.getState();
+  const folder = dirName(id);
   try {
     await download(id, signal);
     networkTries.delete(id);
@@ -129,7 +131,7 @@ async function run(id: string, signal: AbortSignal) {
     const it = s.items[id];
     if (!it) {
       // Removed while downloading.
-      removeFiles(id);
+      removeFiles(id, folder);
       return;
     }
     if (signal.aborted) {
@@ -163,7 +165,6 @@ async function run(id: string, signal: AbortSignal) {
 
 function reasonFor(e: unknown): DownloadFail {
   if (e instanceof Failure) return e.reason;
-  if (e instanceof UnmatchedError) return 'unmatched';
   if (e instanceof MissingEpisodeError) return 'episode';
   if (e instanceof MiruroError) return e.kind === 'blocked' ? 'blocked' : e.kind === 'network' || e.kind === 'timeout' ? 'network' : 'stream';
   return 'network';
@@ -278,7 +279,8 @@ function planAhead(currentId: string) {
   const s = useDownloads.getState();
   const next = s.order.find((k) => k !== currentId && s.items[k]?.status === 'queued');
   if (!next || planning.has(next)) return;
-  const dir = dirFor(next);
+  const folder = dirName(next);
+  const dir = dirFor(next, folder);
   if (readPlan(dir)) return;
   const item = s.items[next];
   const ctrl = new AbortController();
@@ -291,7 +293,7 @@ function planAhead(currentId: string) {
     })
     .finally(() => {
       planning.delete(next);
-      if (!useDownloads.getState().items[next]) removeFiles(next);
+      if (!useDownloads.getState().items[next]) removeFiles(next, folder);
     });
   planning.set(next, job);
 }
@@ -388,7 +390,7 @@ async function makePlan(item: DownloadItem, dir: Directory, signal: AbortSignal)
 
 async function refreshPlan(item: DownloadItem, old: Plan, dir: Directory, signal: AbortSignal): Promise<Plan> {
   const res0 = await resolveFor(item);
-  queryClient.removeQueries({ queryKey: q.play(res0.link.miruro, res0.episode.episode_number).queryKey });
+  queryClient.removeQueries({ queryKey: q.play(res0.id, res0.episode.episode_number).queryKey });
   const res = await resolveFor(item);
   const c = candidates(res.play, res.config, res.env, item.want.audio).find((x) => x.key === old.key);
   if (c) {

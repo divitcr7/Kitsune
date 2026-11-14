@@ -2,13 +2,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import type { Episode, ImageSet, Show } from './api';
+import { migrateStore, type Pending, type V3 } from './migrate';
 
 export type ShowLite = Pick<Show, 'id' | 'slug' | 'name'> & { poster?: ImageSet; background?: ImageSet };
 export type EpisodeLite = Pick<Episode, 'id' | 'slug' | 'number' | 'title' | 'duration'> & { image?: ImageSet };
 export type Progress = { t: number; d: number; at: number };
 export type HistoryEntry = { show: ShowLite; episode: EpisodeLite; at: number };
-/** Which miruro.cx show an anime.nexus show plays from (see lib/miruro/match.ts). */
-export type ShowLink = { anilist: number; miruro: string };
 export type CaptionSize = 's' | 'm' | 'l' | 'xl';
 export type Prefs = {
   audio: 'sub' | 'dub';
@@ -54,16 +53,16 @@ type State = {
   recordPlay: (show: ShowLite, episode: EpisodeLite) => void;
   recordProgress: (showId: string, episode: { id: string; slug: string; number?: number }, t: number, d: number) => void;
   removeHistory: (showId: string) => void;
-  /** Last known anime.nexus sign-in state (null: never checked). */
-  signedIn: boolean | null;
-  setSignedIn: (v: boolean) => void;
-  links: Record<string, ShowLink>;
-  setLink: (showId: string, link: ShowLink | null) => void;
+  /** Saved before 1.3 under anime.nexus ids: old show id → miruro id (see lib/migrate.ts). */
+  moved: Record<string, string>;
+  /** Saved shows not yet found on miruro.cx, by their old id. */
+  pending: Record<string, Pending>;
+  patchPending: (id: string, p: Pending | null) => void;
   prefs: Prefs;
   setPrefs: (p: Partial<Prefs>) => void;
 };
 
-const MAX_PROGRESS = 800;
+const MAX_PROGRESS = 2000;
 
 export const lite = (s: Show | ShowLite): ShowLite => ({
   id: s.id,
@@ -120,15 +119,13 @@ export const useStore = create<State>()(
         set({ history });
       },
 
-      signedIn: null,
-      setSignedIn: (signedIn) => set({ signedIn }),
-
-      links: {},
-      setLink: (showId, link) => {
-        const links = { ...get().links };
-        if (link) links[showId] = link;
-        else delete links[showId];
-        set({ links });
+      moved: {},
+      pending: {},
+      patchPending: (id, p) => {
+        const pending = { ...get().pending };
+        if (p) pending[id] = p;
+        else delete pending[id];
+        set({ pending });
       },
 
       prefs: DEFAULT_PREFS,
@@ -136,26 +133,43 @@ export const useStore = create<State>()(
     }),
     {
       name: 'kitsune-store',
-      version: 3,
+      version: 4,
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: (s) => ({ myList: s.myList, history: s.history, progress: s.progress, signedIn: s.signedIn, links: s.links, prefs: s.prefs }),
-      // Version 1 kept `blockedUntil` (episodes went to the browser while it lasted); drop it.
-      // Version 3 grew `prefs`: fill in what an older one lacks.
-      migrate: (stored) => {
+      partialize: (s) => ({ myList: s.myList, history: s.history, progress: s.progress, prefs: s.prefs, moved: s.moved, pending: s.pending }),
+      // Version 1 kept `blockedUntil`; version 3 grew `prefs`. Version 4 moved everything from
+      // anime.nexus's ids to miruro.cx's (the old data is kept as a backup first).
+      migrate: async (stored, version) => {
         if (!stored || typeof stored !== 'object') return stored as State;
         const rest: Record<string, unknown> = { ...stored };
         delete rest.blockedUntil;
         rest.prefs = migratePrefs(rest.prefs);
-        return rest as State;
+        if (version >= 4) return rest as unknown as State;
+        try {
+          await AsyncStorage.setItem('kitsune-store-v3-backup', JSON.stringify({ state: stored, version }));
+        } catch {
+          // A backup that can't be written doesn't stop the move.
+        }
+        const v4 = migrateStore(rest as V3, await downloadRefs());
+        return { ...v4, prefs: migratePrefs(v4.prefs) } as unknown as State;
       },
       // The default merge is shallow: a stored `prefs` would replace the defaults wholesale.
       merge: (stored, current) => {
         const s = (stored ?? {}) as Partial<State>;
-        return { ...current, ...s, prefs: migratePrefs(s.prefs) };
+        return { ...current, ...s, prefs: migratePrefs(s.prefs), moved: s.moved ?? {}, pending: s.pending ?? {} };
       },
     },
   ),
 );
+
+/** Downloaded episodes as saved (their numbers let their progress move exactly). */
+async function downloadRefs(): Promise<{ episodeId: string; showId: string; number: number }[]> {
+  try {
+    const raw = JSON.parse((await AsyncStorage.getItem('kitsune-downloads')) || 'null') as { state?: { items?: Record<string, { id: string; show: { id: string }; episode: { number: number } }> } } | null;
+    return Object.values(raw?.state?.items ?? {}).map((d) => ({ episodeId: d.id, showId: d.show.id, number: d.episode.number }));
+  } catch {
+    return [];
+  }
+}
 
 export function resumePoint(p?: Progress) {
   if (!p || p.t < 10 || p.t > p.d - 60) return 0;

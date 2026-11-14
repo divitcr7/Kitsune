@@ -4,10 +4,9 @@ import { useTabTrigger } from 'expo-router/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BackHandler, Pressable, StyleSheet, TVFocusGuideView, View } from 'react-native';
 import Animated, { interpolate, useAnimatedStyle, withSpring } from 'react-native-reanimated';
-import { useStore } from '@/lib/store';
 import { tv, EDGE, TV_NAV } from '@/lib/tv';
 import { color, radius, spring } from '@/theme/tokens';
-import { Icon } from './Icon';
+import { Icon, type IconName } from './Icon';
 import { Wordmark } from './Logo';
 import { TABS } from './NavBar';
 import { useTabBarHidden } from './TabBarContext';
@@ -15,14 +14,13 @@ import { T } from './T';
 
 /**
  * The TV's navigation: a quiet bar across the top (Apple TV style) with the wordmark, the four
- * sections and the anime.nexus account. It tucks away while you scroll down a page and comes back
+ * sections and Downloads. It tucks away while you scroll down a page and comes back
  * as soon as the remote's focus reaches it.
  */
 export function TvNav({ onReselect }: { onReselect?: (name: string) => void }) {
   const hidden = useTabBarHidden();
   const { switchTab, getTrigger } = useTabTrigger({ name: 'home' });
   const active = Math.max(0, TABS.findIndex((t) => getTrigger(t.name)?.isFocused));
-  const signedIn = useStore((s) => s.signedIn);
 
   // Back from any section goes Home first (the TV convention); Back on Home leaves the app.
   const current = useRef(active);
@@ -61,12 +59,12 @@ export function TvNav({ onReselect }: { onReselect?: (name: string) => void }) {
           />
         ))}
       </TVFocusGuideView>
-      <Tab label={signedIn ? 'Signed in' : 'Sign in'} icon={signedIn ? 'account-check' : 'account-circle-outline'} onFocus={reveal} onPress={() => router.push('/account')} />
+      <Tab label="Downloads" icon="download-circle-outline" onFocus={reveal} onPress={() => router.push('/downloads')} />
     </Animated.View>
   );
 }
 
-function Tab({ label, icon, active, onPress, onFocus }: { label: string; icon?: 'account-check' | 'account-circle-outline'; active?: boolean; onPress: () => void; onFocus: () => void }) {
+function Tab({ label, icon, active, onPress, onFocus }: { label: string; icon?: IconName; active?: boolean; onPress: () => void; onFocus: () => void }) {
   const [focused, setFocused] = useState(false);
   const fg = focused ? color.onPrimary : active ? color.text : color.textDim;
   return (

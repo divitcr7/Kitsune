@@ -21,7 +21,7 @@ const TILES: [string, string][] = [
 ];
 
 /** Infinite list of pages: `more()` asks for the next one, an effect fetches it. */
-function usePages(key: string, enabled: boolean, fetchPage: (page: number) => Promise<Page<Show>>) {
+function usePages(key: string, enabled: boolean, fetchPage: (page: number, prev?: Page<Show>) => Promise<Page<Show>>) {
   // Pages are kept with the query they belong to, so a new query never shows the old results.
   const [state, setState] = useState<{ key: string; pages: Page<Show>[]; want: number }>({ key, pages: [], want: 1 });
   const [loading, setLoading] = useState(false);
@@ -40,7 +40,7 @@ function usePages(key: string, enabled: boolean, fetchPage: (page: number) => Pr
     if (!enabled || done || pages.length >= want) return;
     let live = true;
     setLoading(true);
-    fetcher.current(pages.length + 1).then(
+    fetcher.current(pages.length + 1, last).then(
       (p) => {
         if (!live) return;
         setState((s) => {
@@ -80,7 +80,7 @@ export function Search() {
   }, [text]);
 
   const searching = query.length > 1;
-  const results = usePages(`search:${query}`, searching, (page) => api.shows({ search: query, page }));
+  const results = usePages(`search:${query}`, searching, (_page, prev) => api.shows({ search: query, cursor: prev?.next }));
   const popular = usePages('popular-week', !searching, (page) => api.discover('popular', page));
   const source = searching ? results : popular;
   const main = useMemo(() => genres.data?.filter((g) => g.type === 'genre'), [genres.data]);
@@ -161,7 +161,7 @@ export function Search() {
 }
 
 export function GenreScreen({ id, title }: { id: string; title: string }) {
-  const shows = usePages(`genre:${id}`, true, (page) => api.shows({ genre: id, page }));
+  const shows = usePages(`genre:${id}`, true, (_page, prev) => api.shows({ genre: id, cursor: prev?.next }));
   return (
     <div className="k-screen">
       <div className="k-page" data-page="80">

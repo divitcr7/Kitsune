@@ -19,7 +19,6 @@ import type { TvCommand } from '@/lib/inject';
 import type { PlaySubtitle, SkipTime } from '@/lib/miruro/api';
 import { MiruroError } from '@/lib/miruro/bridge';
 import { proxyUrl } from '@/lib/miruro/codec';
-import { UnmatchedError } from '@/lib/miruro/match';
 import { MissingEpisodeError, type Resolved, resolveEpisode } from '@/lib/miruro/resolve';
 import { type Audio, type Candidate, candidates, defaultSubtitle, hasAudio, probe, usableSubtitles } from '@/lib/miruro/streams';
 import { fetchCues } from '@/lib/miruro/subs';
@@ -303,7 +302,6 @@ function Player({ session }: { session: Session }) {
   }
 
   function classify(e: unknown): Problem {
-    if (e instanceof UnmatchedError) return { kind: 'unmatched' };
     if (e instanceof MissingEpisodeError) return { kind: 'episode', available: e.available };
     if (e instanceof MiruroError) {
       if (e.status === 429) usePlayer.getState().backOff();
@@ -526,8 +524,7 @@ function Player({ session }: { session: Session }) {
   /** Look the episode up again (stream links expire) and pick up where it got to. */
   function retry() {
     const r = run.current;
-    const link = r.resolved?.link;
-    if (link && r.resolved) queryClient.removeQueries({ queryKey: q.play(link.miruro, r.resolved.episode.episode_number).queryKey });
+    if (r.resolved) queryClient.removeQueries({ queryKey: q.play(r.resolved.id, r.resolved.episode.episode_number).queryKey });
     startOverride.current = r.phase === 'playing' || r.seeked ? Math.floor(player.currentTime) : null;
     reset();
     setLoad((n) => n + 1);

@@ -5,6 +5,7 @@ import type { SkipTime } from '../miruro/api';
 import type { Audio } from '../miruro/streams';
 import { type EpisodeLite, lite, type ShowLite } from '../store';
 import type { Show } from '../api';
+import { migrateDownloads, type OldDownload } from '../migrate';
 
 export type DownloadStatus = 'queued' | 'resolving' | 'downloading' | 'paused' | 'done' | 'failed';
 export type DownloadFail = 'network' | 'space' | 'stream' | 'unmatched' | 'episode' | 'blocked' | 'protected';
@@ -27,6 +28,10 @@ export type DownloadItem = {
   /** Checkpoint of segments saved (the live figure is in useDownloadLive). */
   segs?: { done: number; total: number };
   bytes: number;
+  /** Folder name under downloads/ (downloads saved before 1.3 keep their old folder). */
+  dir?: string;
+  /** Saved before 1.3 and not yet moved onto a miruro show (plays offline; can't stream). */
+  legacy?: boolean;
 };
 
 type State = {
@@ -104,7 +109,20 @@ export const useDownloads = create<State>()(
     }),
     {
       name: 'kitsune-downloads',
-      version: 1,
+      version: 2,
+      // Version 2: ids moved from anime.nexus's to miruro.cx's; files stay where they were.
+      migrate: async (stored, version) => {
+        const st = (stored ?? {}) as { items?: Record<string, OldDownload>; order?: string[]; paused?: boolean };
+        if (version >= 2 || !st.items) return st as never;
+        try {
+          await AsyncStorage.setItem('kitsune-downloads-v1-backup', JSON.stringify({ state: stored, version }));
+        } catch {
+          // Carry on without the backup.
+        }
+        const moved = await movedShows();
+        const { items, order } = migrateDownloads(st.items, st.order ?? Object.keys(st.items), moved);
+        return { ...st, items, order } as never;
+      },
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (s) => ({ items: s.items, order: s.order, paused: s.paused }),
       // Whatever was mid-transfer when the app stopped goes back in the queue; saved segments stay.
@@ -117,6 +135,20 @@ export const useDownloads = create<State>()(
     },
   ),
 );
+
+/** anime.nexus show id → miruro id, from the main store whether or not it has moved yet. */
+async function movedShows(): Promise<Record<string, string>> {
+  try {
+    const raw = JSON.parse((await AsyncStorage.getItem('kitsune-store')) || 'null') as {
+      state?: { moved?: Record<string, string>; links?: Record<string, { miruro?: string }> };
+    } | null;
+    const out: Record<string, string> = { ...(raw?.state?.moved ?? {}) };
+    for (const [id, l] of Object.entries(raw?.state?.links ?? {})) if (l?.miruro) out[id] = l.miruro;
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 /** Live progress of the item being downloaded (not persisted; updated a few times a second). */
 export const useDownloadLive = create<{ id: string | null; done: number; total: number; bytes: number; bps: number; set: (p: Partial<{ id: string | null; done: number; total: number; bytes: number; bps: number }>) => void }>((set) => ({

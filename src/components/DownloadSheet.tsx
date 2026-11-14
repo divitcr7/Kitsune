@@ -71,7 +71,7 @@ export function DownloadSheet({ show, total, onClose }: { show: Show; total: num
       if (!added && picked.length) setError('Those episodes are already downloaded or in the queue.');
       else onClose();
     } catch {
-      setError('Couldn’t load the episode list from anime.nexus. Check your connection and try again.');
+      setError('Couldn’t load the episode list from miruro.cx. Check your connection and try again.');
     } finally {
       setBusy(false);
     }

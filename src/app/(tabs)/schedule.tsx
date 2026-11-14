@@ -145,9 +145,9 @@ function Row({ show, first }: { show: Show; first: boolean }) {
         <T variant="label" style={{ fontWeight: '700' }}>
           {time ?? 'TBA'}
         </T>
-        {time ? (
+        {show.airing ? (
           <T variant="micro" faint style={{ marginTop: 2 }}>
-            JST
+            EP {show.airing.episode}
           </T>
         ) : null}
       </View>

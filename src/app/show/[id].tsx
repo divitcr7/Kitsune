@@ -17,7 +17,7 @@ import { T } from '@/components/T';
 import { TopBar } from '@/components/TopBar';
 import type { Episode, Show, Stats } from '@/lib/api';
 import { clock, compact, minutes, year } from '@/lib/format';
-import { art, imgUrl, webUrl } from '@/lib/img';
+import { art, imgUrl, showUrl } from '@/lib/img';
 import { playEpisode, preloadEpisode, previewOf } from '@/lib/nav';
 import { allowNotifications } from '@/lib/notify';
 import { q } from '@/lib/queries';
@@ -207,7 +207,7 @@ function Body({ show, stats }: { show: Show; stats?: Stats }) {
             }}
           />
           {total ? <Action icon="download-multiple" label="Download" onPress={() => setSheet(true)} /> : null}
-          {isTV ? null : <Action icon="share-variant-outline" label="Share" onPress={() => Share.share({ message: `${show.name}\n${webUrl(`/series/${show.id}/${show.slug}`)}` })} />}
+          {isTV ? null : <Action icon="share-variant-outline" label="Share" onPress={() => Share.share({ message: `${show.name}\n${showUrl(show.id)}` })} />}
           <Action
             icon={order === 'asc' ? 'sort-numeric-ascending' : 'sort-numeric-descending'}
             label={order === 'asc' ? 'Oldest first' : 'Newest first'}

@@ -23,7 +23,7 @@ export function compact(n?: number | string | null) {
   return String(v);
 }
 
-/** "16:00:00" → "16:00". Broadcast times come from MyAnimeList and are in JST. */
+/** "16:00:00" → "16:00". Schedule times are already in the device's own time zone. */
 export function broadcastTime(b?: string | null) {
   return b ? b.slice(0, 5) : undefined;
 }
