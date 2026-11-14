@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import type { Show } from './api';
 import { haptics } from './haptics';
 import { imgUrl } from './img';
+import { prefetchEpisode } from './miruro/resolve';
 import { type Session, usePlayer } from './player';
 import { queryClient, q } from './queries';
 import { type EpisodeLite, lite, resumePoint, type ShowLite, useStore } from './store';
@@ -42,18 +43,17 @@ function session(show: Show | ShowLite, episode: EpisodeLite): Session {
   };
 }
 
-/** The episode's page on anime.nexus. */
-export const watchUrl = (episode: { id: string; slug: string }) => `https://anime.nexus/watch/${episode.id}/${episode.slug}`;
-
 export function playEpisode(show: Show | ShowLite, episode: EpisodeLite) {
   useStore.getState().recordPlay(lite(show), episode);
   haptics.impact();
   usePlayer.getState().open(session(show, episode));
 }
 
-/** Loads `episode` in the hidden player so pressing Play on it is instant. */
+/** Looks up `episode`'s streams on miruro.cx ahead of time so pressing Play on it is quick. */
 export function preloadEpisode(show: Show | ShowLite, episode: EpisodeLite) {
-  usePlayer.getState().preload(session(show, episode));
+  const player = usePlayer.getState();
+  if (player.visible || !player.mayPrefetch()) return;
+  prefetchEpisode(show.id, episode.number);
 }
 
 /** Episode `number` of a show (episodes come 100 to a page). */

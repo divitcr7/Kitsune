@@ -1,92 +1,107 @@
 # Kitsune
 
-A client for [anime.nexus](https://anime.nexus): its own native UI over the site's catalog API, and
-the site's own player for video. One Expo / React Native app (TypeScript, `react-native-tvos`) ships
-as a single APK for Android phones and Android TV; `tv/tizen` is a separate Samsung TV build
-(Preact, a TizenBrew module) that reuses the same page scripts.
+An Android client with its own native UI over [anime.nexus](https://anime.nexus)'s catalog API, and
+episodes streamed from [miruro.cx](https://www.miruro.cx) into the app's own native player. One Expo /
+React Native app (TypeScript, `react-native-tvos`) ships as a single APK for Android phones and
+Android TV; `tv/tizen` is a separate Samsung TV build (Preact, a TizenBrew module) that still uses
+anime.nexus's player through the page scripts in `src/lib/inject.ts`.
 
-## The one rule about video
+## The rules about video
 
-**Episodes play inside Kitsune. The app never opens a browser by itself.** The only way out to a
-browser is the "Open in browser" button on the player's error screen, which the person taps.
+**Episodes play inside Kitsune, with no ads.** The app never opens a browser, and never loads a page
+of miruro.cx's site (its pages carry ad networks). Video is played by `expo-video` (ExoPlayer) from
+the HLS streams miruro.cx's API lists for an episode. Kitsune never downloads or decrypts streams.
 
-Video is the site's watch page (`https://anime.nexus/watch/<id>/<slug>`) in a WebView with a script
-injected into it. Kitsune never downloads, extracts or decrypts streams.
+miruro.cx sits behind Cloudflare, which turns away clients that aren't browsers and sometimes checks
+a browser before letting it through. Kitsune's job is to **stay out of its way**:
 
-anime.nexus sits behind Cloudflare, which sometimes checks a connection before letting a page
-through ("Just a moment…", "Verify you are human"). That check is legitimate and Kitsune's job is
-to **stay out of its way**:
-
-- The check page arrives with HTTP 403. A 4xx on a watch page is therefore *not* "the site refuses
-  apps"; never treat it as a reason to leave the app.
-- On a check page the injected script does nothing: no ad guard, no patched prototypes, no styles.
-  It only tells the app the check is there. The person (or Cloudflare by itself) completes it, the
-  page reloads, and the script starts normally on the real page.
-- Do not automate, pre-solve, spoof or route around the check (no user-agent disguises, no
-  replaying cookies, no header tricks). If the check cannot be passed in the app, say so on screen.
+- API calls go through a real browser: a hidden WebView on the site's origin (the bridge, below).
+  Never call the API from native code, and never set a user agent, replay cookies or add headers to
+  look like a browser. An auto-mode safety check refuses exactly that, and rightly.
+- A Cloudflare check in the bridge is shown to the person (after a short grace period) and never
+  answered for them. If it keeps coming back, say so on screen.
+- Opening an `/api/` path as a page is blocked outright by the site's firewall (HTTP 403 "Sorry,
+  you have been blocked"), so the bridge opens `/robots.txt` and calls the API from there.
+- Stream requests may carry only the `Referer`/`Origin` that the play API lists for that server,
+  or go through miruro's own stream proxy (which needs no headers), as the site's player does.
 
 ## Layout
 
 ```
 src/app/                 expo-router screens: (tabs)/ index, discover, schedule, library;
                          show/[id], genre/[id], account
-src/components/Player.tsx   the app's single player (WebView + loader, error and check states)
-src/components/PlayerOsd.tsx  Android TV on-screen controls, driven by the page's 'tick' messages
-src/lib/inject.ts        every script string that runs inside anime.nexus pages
-src/lib/player.ts        zustand store for the one player session (open / preload / close)
-src/lib/nav.ts           playEpisode, preloadEpisode, upNext, openShow
-src/lib/api.ts, queries.ts  catalog API (api.anime.nexus) through TanStack Query
-src/lib/store.ts         persisted list, history, progress, sign-in state (AsyncStorage)
+src/components/Player.tsx      the app's single player: resolve, try streams, loader, problems
+src/components/PhoneControls.tsx  phone controls over the video (tap to show; seek bar, sub/dub, CC)
+src/components/PlayerOsd.tsx   Android TV on-screen controls, driven by the player's ticks
+src/components/MiruroBridge.tsx  the hidden miruro.cx tab; shown only for a Cloudflare check
+src/lib/miruro/bridge.ts  request queue between the app and that tab
+src/lib/miruro/codec.ts   response decoding and the stream proxy's URL scheme (pure)
+src/lib/miruro/api.ts     miruro.cx API calls and types
+src/lib/miruro/score.ts, match.ts  anime.nexus show -> AniList id -> miruro id
+src/lib/miruro/streams.ts ranking an episode's streams, probing them (pure apart from probe)
+src/lib/miruro/resolve.ts everything the player needs for one episode
+src/lib/subtitles.ts      VTT/SRT parsing for subtitle files drawn over the video (pure)
+src/lib/inject.ts        script strings: the bridge's, and the anime.nexus ones the Tizen module uses
+src/lib/player.ts        zustand store for the one player session
+src/lib/nav.ts           playEpisode, preloadEpisode (a data prefetch), upNext, openShow
+src/lib/api.ts, queries.ts  catalog API (api.anime.nexus) and miruro queries via TanStack Query
+src/lib/store.ts         persisted list, history, progress, show links, sub/dub prefs (AsyncStorage)
 src/lib/tv.ts            isTV and TV sizing helpers
 src/lib/updates.ts       in-app updates from GitHub releases
 tv/tizen/                Samsung TV module; imports src/lib/inject.ts, own UI in tv/tizen/src/ui
-scripts/                 build-apk.sh, check-player-script.mjs, github-release.sh, publish-tizen.sh
+scripts/                 build-apk.sh, check-player-script.mjs, check-miruro.mjs, github-release.sh,
+                         publish-tizen.sh; fixtures/ holds a real miruro.cx response for the checks
 ```
 
 `android/` is generated by `expo prebuild` from `app.json` and is not in the repo; never edit it.
 
 ## How playback works
 
-1. `playEpisode` (`src/lib/nav.ts`) opens a session in `usePlayer`; `PlayerHost` renders `Player`
-   above everything. `preloadEpisode` loads the same page hidden so Play is instant (rate-limited:
-   each load is a streaming session on the site).
-2. `Player` loads the watch page with `playerScript(...)` as `injectedJavaScriptBeforeContentLoaded`
-   and re-injects it at every load milestone, because Android can deliver the first injection
-   before the new document exists. The script is idempotent (`window.__kitsune`).
-3. The script goes through the **gate** first (see below), then on a real page: runs the ad guard
-   (`GUARD`: allowlist for script and iframe hosts, no popups or dialogs), pins the site's player
-   full screen, autoplays, resumes, and posts messages to the app.
-4. The page talks to the app only with `window.ReactNativeWebView.postMessage(JSON)`; the app talks
-   to the page only with `injectJavaScript` of the small scripts exported from `inject.ts`.
+1. `playEpisode` (`src/lib/nav.ts`) opens a session in `usePlayer`; `PlayerHost` renders `Player`.
+   Ids, history and progress stay anime.nexus's; miruro is only where the video comes from.
+2. `resolveEpisode` (`lib/miruro/resolve.ts`):
+   - links the show (`match.ts`): AniList's public GraphQL search by title, scored on year, format
+     and episode count (`score.ts`; needs ≥ 70 and a 10-point lead), then
+     `/api/v1/anime?anilist_id_in=<id>&limit=100`. Links are persisted in `store.links`.
+   - maps the episode number (lining up first episodes when one side counts on from a season
+     before), then `/api/v1/anime/<id>/episodes/<n>/play`, with `/api/config` and `/env2.js`.
+3. `candidates` (`streams.ts`) ranks streams: miruro's `providerOrder` (visible providers only), the
+   provider's `variantOrder` within the sub/dub preference (`ssub` = clean video + subtitle files,
+   `sub` = burned in), proxy URL first where the provider is proxied, then the stream direct with its
+   listed headers. The last server that worked for a show goes first.
+4. `Player` probes the first four playlists in parallel, then hands streams to the player one at a
+   time; a stream that errors or isn't ready in 12 s gives way to the next. A mid-episode error
+   retries the same stream once from where it was.
+5. While playing: subtitle files are fetched and drawn as an overlay, `skip_times` give the skip
+   pill, progress is saved every 5 s, and the end of an episode moves on to the next.
 
-Messages from the page (`type`):
+The miruro catalog only answers the exact query shapes its site sends ("Unsupported catalog
+request" otherwise; e.g. `limit=100` works for the AniList lookup and 50 doesn't). Keep the paths in
+`lib/miruro/api.ts` as they are, and check a new one in a browser on the site first.
 
-| type | meaning |
-| --- | --- |
-| `gate` | what kind of document loaded: `kind: 'none'` (the real page), `'check'` (Cloudflare's check), `'refused'` (an error page); with `status`, and `text` for `refused` |
-| `ready` | a playable video exists; the loader comes down |
-| `loading` | the site moved to another episode |
-| `progress` | `id, slug, number, t, d` every few seconds, for resume and history |
-| `tick` | once a second on TV, for the OSD |
-| `verify` | the site's in-player "verify you are human" box is showing (`on`) |
-| `problem` | the site's own error text (`kind: 'auth' \| 'stream'`) |
-| `signin`, `close`, `toast`, `ended` | as named |
+Responses with `application/octet-stream` are the gzipped JSON XORed with `miruro/catalog`. The
+stream proxy URL is `PROXY + b64url(xor(url, key)) + "~" + b64url(xor(JSON(headers), key)) +
+"/pl.m3u8"`, with `PROXY` and the hex `key` from `/env2.js`. `scripts/check-miruro.mjs` pins both.
+
+### The bridge
+
+`MiruroBridge` mounts a WebView on `https://www.miruro.cx/robots.txt` the first time anything asks
+the API, with `bridgeScript` injected at every load milestone (it is idempotent). The script goes
+through the **gate** (below), posts `{ type: 'bridge' }`, and then answers
+`window.__kitsuneApi(id, path)` (only `/api/...` and `/env2.js`) with a same-origin XHR, posting
+`{ type: 'res', id, status, ctype, b64 }`. Decoding happens in the app. An HTML 403 from an API call
+means Cloudflare wants another look: the tab reloads (so a check can show) and the call is sent
+once more.
 
 ### The gate
 
-`inject.ts` wraps both `playerScript` and `accountScript` in `gate(run)`. It reads the document's
-HTTP status from `performance.getEntriesByType('navigation')[0].responseStatus`:
+`inject.ts` wraps every page script in `gate(run)`. It reads the document's HTTP status from
+`performance.getEntriesByType('navigation')[0].responseStatus`:
 
-- status < 400 (or unknown, on old engines): report `none` and `run()` immediately, so the guard is
-  in place before the site's first script.
+- status < 400 (or unknown, on old engines): report `none` and `run()` immediately.
 - status >= 400: wait for the DOM. A Cloudflare check (`window._cf_chl_opt`, its challenge
   elements, or its title) reports `check` and never calls `run()` on that document. Anything else
   reports `refused` with a short summary and then runs.
-
-In `Player.tsx`: `check` keeps the loader up for a few seconds (most checks pass alone), then shows
-the page so it can be answered; on TV the WebView takes the remote's focus. `none` after a check
-puts the loader back until `ready`. `refused` shows the "anime.nexus didn't open this episode"
-screen. A check that keeps coming back ends on that screen too, rather than looping.
 
 Recognise the check by `_cf_chl_opt` first. Its title is translated by language, and normal site
 pages also contain a Turnstile box and Cloudflare's `/cdn-cgi/challenge-platform/scripts/jsd/`
@@ -136,18 +151,23 @@ only an APK named `Kitsune-vX.Y.Z.apk`, so it never offers these.
 
 ## Testing a player change
 
-The app itself only runs on a device. Without one, the page scripts can still be exercised in
-headless Chromium: serve a stand-in for anime.nexus with Playwright's `route()` (a 403 check page
-that sets `window._cf_chl_opt`, then a 200 page with a `.video-js > video`), define
-`window.ReactNativeWebView.postMessage`, add `playerScript(...)` as an init script, and assert on
-the messages and on `video.currentTime`. Check both that the check page is left untouched
-(`Element.prototype.setAttribute` is still native) and that the guard is active on the real page.
-Say plainly in the write-up what was and was not run on a real phone or TV.
+The app itself only runs on a device. Without one:
+
+- `npm run typecheck` runs `check-miruro.mjs`: decoding a real captured response, the proxy URL
+  scheme against one built by the site, show matching, stream ranking, VTT/SRT parsing.
+- The bridge script can be run as it is in a browser tab on `https://www.miruro.cx/robots.txt`:
+  define `window.ReactNativeWebView.postMessage`, eval `bridgeScript`, call `window.__kitsuneApi`,
+  and check the `res` messages (status 200, `application/octet-stream` for catalog paths).
+- `score.ts` can be run against AniList's live API from Node for a list of real show names.
+
+What only a device can show: ExoPlayer actually playing the proxied and direct streams, whether
+Cloudflare lets the Android WebView through, and focus on Android TV. Say plainly in the write-up
+what was and was not run on a real phone or TV.
 
 ## Conventions
 
 - Comments say why, in a sentence, where the code alone would not. UI copy is plain and specific,
-  with typographic apostrophes (`’`), and names anime.nexus when the site is the cause.
+  with typographic apostrophes (`’`), and names miruro.cx or anime.nexus when a site is the cause.
 - State lives in two zustand stores (`player.ts` in memory, `store.ts` persisted). Bump the persist
   `version` and add a `migrate` when a persisted field is removed or reshaped.
 - A release is one commit titled `Kitsune vX.Y.Z: <what changed>` that bumps `version` in

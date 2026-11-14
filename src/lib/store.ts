@@ -7,6 +7,9 @@ export type ShowLite = Pick<Show, 'id' | 'slug' | 'name'> & { poster?: ImageSet;
 export type EpisodeLite = Pick<Episode, 'id' | 'slug' | 'number' | 'title' | 'duration'> & { image?: ImageSet };
 export type Progress = { t: number; d: number; at: number };
 export type HistoryEntry = { show: ShowLite; episode: EpisodeLite; at: number };
+/** Which miruro.cx show an anime.nexus show plays from (see lib/miruro/match.ts). */
+export type ShowLink = { anilist: number; miruro: string };
+export type Prefs = { audio: 'sub' | 'dub'; subs: boolean };
 
 type State = {
   myList: ShowLite[];
@@ -19,6 +22,10 @@ type State = {
   /** Last known anime.nexus sign-in state (null: never checked). */
   signedIn: boolean | null;
   setSignedIn: (v: boolean) => void;
+  links: Record<string, ShowLink>;
+  setLink: (showId: string, link: ShowLink | null) => void;
+  prefs: Prefs;
+  setPrefs: (p: Partial<Prefs>) => void;
 };
 
 const MAX_PROGRESS = 800;
@@ -55,7 +62,7 @@ export const useStore = create<State>()(
           ids.slice(0, ids.length - MAX_PROGRESS).forEach((id) => delete progress[id]);
         }
         const entry = get().history[showId];
-        // The site's player can move on to the next episode by itself; follow it.
+        // The player can move on to the next episode by itself; follow it.
         const history =
           entry && entry.episode.id !== ep.id
             ? {
@@ -80,12 +87,23 @@ export const useStore = create<State>()(
 
       signedIn: null,
       setSignedIn: (signedIn) => set({ signedIn }),
+
+      links: {},
+      setLink: (showId, link) => {
+        const links = { ...get().links };
+        if (link) links[showId] = link;
+        else delete links[showId];
+        set({ links });
+      },
+
+      prefs: { audio: 'sub', subs: true },
+      setPrefs: (p) => set({ prefs: { ...get().prefs, ...p } }),
     }),
     {
       name: 'kitsune-store',
       version: 2,
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: (s) => ({ myList: s.myList, history: s.history, progress: s.progress, signedIn: s.signedIn }),
+      partialize: (s) => ({ myList: s.myList, history: s.history, progress: s.progress, signedIn: s.signedIn, links: s.links, prefs: s.prefs }),
       // Version 1 kept `blockedUntil` (episodes went to the browser while it lasted); drop it.
       migrate: (stored) => {
         if (!stored || typeof stored !== 'object' || !('blockedUntil' in stored)) return stored as State;

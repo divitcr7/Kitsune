@@ -79,15 +79,15 @@ No accounts. No analytics. No trackers. Your list and history stay on your phone
 | | |
 | --- | --- |
 | 🎬 **Cinematic home** | Full-bleed hero with a slow Ken Burns push, title art, story-style progress, Top 10, new episodes, seasonal, trending |
-| ⚡ **Near-instant play** | While you read a show's page, the up-next episode quietly loads in the background, so Play just plays |
-| 🛡️ **Zero popups** | Ad scripts, iframes, popups and off-site redirects are blocked before they load (allowlist, not a blocklist) |
+| ⚡ **Quick play** | While you read a show's page, the up-next episode's streams are looked up in the background, so Play starts fast |
+| 🛡️ **Zero ads** | Episodes play in Kitsune's own native player from miruro.cx's streams. No web page, so no ads, popups or redirects |
+| ⏭️ **Skip intro** | Skip the opening or ending with one tap (Up on a TV remote), sub or dub, and subtitles in your language |
 | ⏯️ **Pick up anywhere** | Progress saved per episode, Continue Watching on Home and My Stuff, auto-resume, next episode follows along |
 | 📺 **Player-only view** | Just the video, full screen, landscape, immersive, screen stays awake. Pinch to fill the screen |
 | 🔎 **Search & categories** | Live search across English and Japanese titles, browse by genre, popular this week |
 | 📅 **Schedule** | A weekly TV guide with air times, starting on today |
 | 🔖 **My Stuff** | My List, watch history (swipe to remove), and how many hours you've put in |
 | 🔄 **In-app updates** | New GitHub releases show up in the app: one tap downloads, checks and installs them, and your list and history stay |
-| 🔐 **anime.nexus sign-in** | Sign in once (My Stuff → anime.nexus account) and the player streams as you, with no guest limits |
 | 📺 **On your TV** | The same APK runs on Android TV and Google TV with a 10-foot UI made for the remote; Samsung TVs get it through TizenBrew |
 | 🪶 **Light** | ~35 MB arm64 APK, R8-shrunk, cached catalog for instant cold starts |
 
@@ -150,15 +150,17 @@ Samsung TVs (Tizen) get Kitsune as a [TizenBrew](https://github.com/reisxd/Tizen
 
 ## Troubleshooting
 
-**"Sign in to continue this streaming session" or "Too many new guest sessions".** That's anime.nexus limiting guest streams. Kitsune shows a screen with **Sign in** and **Try again**. Signing in to your anime.nexus account (My Stuff → anime.nexus account) lifts the guest limits, and playback picks up where it stopped. Use your email and password: Google blocks its sign-in inside apps, so if you signed up with Google, add a password on anime.nexus in a browser first.
+**A Cloudflare page ("Just a moment…" or "Verify you are human") before the episode.** miruro.cx has Cloudflare check connections now and then. Kitsune shows the check as it is: most of the time it passes by itself after a few seconds, sometimes it needs a tap on the box (on a TV: OK on the remote). Then the episode plays. Kitsune never opens your browser by itself.
 
-**"This episode won't start right now".** anime.nexus refused the stream for a moment, usually a short rate limit. Wait a minute and tap **Try again**. Kitsune also pauses its background preloading for a while so it doesn't make things worse.
+**"Couldn't find this show on miruro.cx".** Kitsune finds each anime.nexus show on miruro.cx by matching its title and year on AniList, and this one didn't match closely enough to be sure. Other shows still play.
 
-**A Cloudflare page ("Just a moment…" or "Verify you are human") before the episode.** anime.nexus has Cloudflare check connections now and then. The check runs inside Kitsune's player, untouched: most of the time it passes by itself after a few seconds, sometimes it needs a tap on the box (on a TV: OK on the remote). Then the episode plays in the app. Kitsune never opens your browser by itself.
+**"Episode N isn't on miruro.cx yet".** The episode is out on anime.nexus but miruro.cx hasn't listed it. New episodes usually appear there within a few hours.
 
-**"anime.nexus didn't open this episode".** anime.nexus answered with an error page instead of the episode. That's usually temporary: wait a moment and tap **Try again**. On a phone you can also choose **Open in browser** to watch it on the site.
+**"No working stream for this episode".** Kitsune tried every stream miruro.cx offered and none started. That's usually temporary: wait a minute and tap **Try again**. If the other language has streams, **Play the dub** / **Play subbed** is right there.
 
-**A "Verify you are human" box over the video.** That's Cloudflare, on anime.nexus's behalf. Tap it and playback continues. On a TV, Kitsune puts the remote's focus on it: press OK (Back leaves the player).
+**"miruro.cx didn't let Kitsune through".** Cloudflare's check kept coming back. Give it a moment and tap **Try again**.
+
+**"Couldn't reach miruro.cx" or "miruro.cx answered with an error".** A connection problem or a hiccup on the site. Check your connection and tap **Try again**.
 
 ## How it works
 
@@ -168,21 +170,20 @@ Samsung TVs (Tizen) get Kitsune as a [TizenBrew](https://github.com/reisxd/Tizen
  │  React Native UI ──► anime.nexus catalog API (public JSON)        │
  │   home · search · schedule · show pages · images (AVIF via CDN)   │
  │                                                                   │
- │  Player ──► WebView on the site's own /watch page                 │
- │             + injected guard script:                              │
- │               · allowlist for scripts / iframes / navigation      │
- │               · window.open, document.write, alerts → no-ops      │
- │               · pins the video player full screen, hides the rest │
- │               · reports progress back for resume                  │
- │               · TV: takes remote commands, reports for the OSD    │
+ │  Play ──► show matched on AniList (title, year, format)           │
+ │       ──► miruro.cx API, asked from a hidden in-app browser tab   │
+ │           on the site (robots.txt: none of the site's scripts)    │
+ │       ──► episode streams ranked; native player (ExoPlayer) tries │
+ │           them in turn until one plays                            │
+ │       ──► Kitsune's own controls, subtitles and skip-intro on top │
  └───────────────────────────────────────────────────────────────────┘
 
  Android TV: the same app (React Native's TV fork), TV layouts when Platform.isTV.
- Samsung TV: a TizenBrew module runs the same guard script in anime.nexus's page,
-             with a Preact 10-foot UI on the site's origin (tv/tizen).
+ Samsung TV: a TizenBrew module with a Preact 10-foot UI (tv/tizen); it still uses
+             anime.nexus's player and hasn't moved to miruro.cx yet.
 ```
 
-Kitsune never downloads, rehosts or decrypts video. Streams play inside the site's own player, exactly as they would in a browser, minus the ads and popups.
+Kitsune never rehosts or decrypts video. It asks miruro.cx for an episode's streams the way the site's own player does and plays them natively, so none of the site's pages (or their ads) are ever loaded.
 
 ## Build it yourself
 
@@ -253,7 +254,7 @@ Kitsune stands on a lot of great work:
 
 ## Disclaimer
 
-Kitsune doesn't host, upload or rehost any content. Everything you see and play is loaded from anime.nexus, the same as opening the site in a browser. It's a personal, non-commercial project. If you love a show, support the official release.
+Kitsune doesn't host, upload or rehost any content. The catalog is loaded from anime.nexus and episodes stream from miruro.cx's sources, the same as opening those sites in a browser. It's a personal, non-commercial project. If you love a show, support the official release.
 
 ## Say hi
 

@@ -1,101 +1,142 @@
+import { useEventListener } from 'expo';
 import { Image } from 'expo-image';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { LinearGradient } from 'expo-linear-gradient';
 import { NavigationBar, setVisibilityAsync } from 'expo-navigation-bar';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { BackHandler, Linking, StyleSheet, View } from 'react-native';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useSharedValue,
-  withDelay,
-  withSequence,
-  withSpring,
-  withTiming,
-} from 'react-native-reanimated';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import { useEffect, useRef, useState } from 'react';
+import { BackHandler, Pressable, StyleSheet, View } from 'react-native';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withSequence, withSpring, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
-import { WebView, type WebViewMessageEvent } from 'react-native-webview';
-import type { ShouldStartLoadRequest, WebViewHttpErrorEvent } from 'react-native-webview/lib/WebViewTypes';
-import { queryClient } from '@/lib/queries';
 import { haptics, NotificationFeedbackType } from '@/lib/haptics';
-import { flushScript, pauseScript, playerScript, revealScript, tvCommandScript, type TvCommand } from '@/lib/inject';
-import { findEpisode, watchUrl } from '@/lib/nav';
+import type { TvCommand } from '@/lib/inject';
+import { MiruroError } from '@/lib/miruro/bridge';
+import { proxyUrl } from '@/lib/miruro/codec';
+import { UnmatchedError } from '@/lib/miruro/match';
+import { MissingEpisodeError, type Resolved, resolveEpisode } from '@/lib/miruro/resolve';
+import { type Audio, type Candidate, candidates, defaultSubtitle, hasAudio, probe, usableSubtitles } from '@/lib/miruro/streams';
+import { findEpisode } from '@/lib/nav';
 import { type Session, usePlayer } from '@/lib/player';
+import { queryClient, q } from '@/lib/queries';
 import { resumePoint, useStore } from '@/lib/store';
+import { type Cue, cueAt, parseCues } from '@/lib/subtitles';
 import { isTV, tv } from '@/lib/tv';
 import { color, radius, spring } from '@/theme/tokens';
 import { Button, IconButton } from './Button';
-import { FocusBlock } from './FocusBlock';
 import { Icon } from './Icon';
+import { PhoneControls } from './PhoneControls';
 import { PlayerOsd, type Tick } from './PlayerOsd';
 import { Spinner } from './Spinner';
 import { T } from './T';
 
-const ALLOWED = /(^|\.)(anime\.nexus|anime\.delivery|challenges\.cloudflare\.com)$/i;
-const READY_TIMEOUT = 15_000;
-// Most of Cloudflare's checks pass by themselves within a few seconds; only show one that doesn't.
-const GATE_GRACE = 3500;
-// A check that keeps coming back after it passes won't let the episode through.
-const MAX_CHECKS = 4;
+// A stream that hasn't produced a playable video in this long is treated as dead.
+const START_TIMEOUT = 12_000;
+// How many streams to check in parallel before handing the first to the player.
+const PROBE_FIRST = 4;
+const SAVE_EVERY = 5;
 
-/** Renders the app's single player above everything; hidden while it preloads. */
+/** The server that last worked for a show, tried first next time (this run of the app only). */
+const lastGood = new Map<string, { provider: string; server: string }>();
+
+type Problem =
+  | { kind: 'unmatched' }
+  | { kind: 'episode'; available: number }
+  | { kind: 'stream'; tried: number; other: Audio | null }
+  | { kind: 'blocked' }
+  | { kind: 'network' }
+  | { kind: 'api'; text: string };
+
+type Phase = 'resolving' | 'starting' | 'playing' | 'problem';
+
+/** Renders the app's single player above everything. */
 export function PlayerHost() {
   const session = usePlayer((s) => s.session);
-  const visible = usePlayer((s) => s.visible);
   if (!session) return null;
-  return <Player key={session.episodeId} session={session} visible={visible} />;
+  return <Player key={session.episodeId} session={session} />;
 }
 
-function Player({ session, visible }: { session: Session; visible: boolean }) {
-  const web = useRef<WebView<object>>(null);
+/**
+ * Plays an episode natively from miruro.cx's streams: the show is matched to miruro, the episode's
+ * streams are ranked (lib/miruro/streams.ts) and tried in turn until one plays. Nothing of the
+ * site's own pages is loaded, so there's nothing to show ads.
+ */
+function Player({ session }: { session: Session }) {
   const close = usePlayer((s) => s.close);
   const recordProgress = useStore((s) => s.recordProgress);
-  const [ready, setReady] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-  const [episode, setEpisode] = useState({ number: String(session.number), title: session.title });
+  const audio = useStore((s) => s.prefs.audio);
+  const [now, setNow] = useState({ id: session.episodeId, slug: session.slug, number: session.number, title: session.title });
+  const [load, setLoad] = useState(0);
+  const [phase, setPhase] = useState<Phase>('resolving');
+  const [problem, setProblem] = useState<Problem | null>(null);
+  const [fill, setFill] = useState(false);
+  const [cue, setCue] = useState('');
+  const [skip, setSkip] = useState<{ label: string; to: number } | null>(null);
   const [toast, setToast] = useState<{ text: string; key: number } | null>(null);
-  const [problem, setProblem] = useState<{ kind: 'auth' | 'stream' | 'blocked'; text: string; blocked?: string[] } | null>(null);
-  const [verifying, setVerifying] = useState(false);
-  // Cloudflare's check page is what's loaded (in place of the episode), and whether it's on show.
-  const [gate, setGate] = useState(false);
-  const [gateOpen, setGateOpen] = useState(false);
-  // Check pages since the episode last played.
-  const checks = useRef(0);
   const [closing, setClosing] = useState(false);
-  // What the page should load; a retry swaps in the episode now playing and where it got to.
-  const [target, setTarget] = useState({ id: session.episodeId, slug: session.slug, t: session.startAt });
-  // The episode on screen right now (the site can move on to the next one by itself).
-  const now = useRef({ id: session.episodeId, slug: session.slug, number: session.number });
 
-  const uri = `https://anime.nexus/watch/${target.id}/${target.slug}`;
-  const pageUrl = useRef(uri);
-  // Built per load: whether it starts as a preload is decided when it's created.
-  const script = useMemo(() => playerScript({ id: target.id, t: target.t, preload: !visible, tv: isTV }), [target]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Android runs the "before content" script from onPageStarted, which can land before the new
-  // document exists and be lost. The script is idempotent, so re-inject at every load milestone.
-  const inject = () => web.current?.injectJavaScript(script);
+  // Everything the player's event handlers need, current at all times (they outlive renders).
+  const run = useRef({
+    token: 0,
+    phase: 'resolving' as Phase,
+    list: [] as Candidate[],
+    index: 0,
+    startAt: session.startAt,
+    seeked: false,
+    retried: false,
+    resolved: null as Resolved | null,
+    audioUsed: 'sub' as Audio,
+    subs: [] as Candidate['subtitles'],
+    subIndex: -1,
+    cues: [] as Cue[],
+    cue: '',
+    skipKey: '',
+    savedAt: 0,
+    fill: false,
+    timer: undefined as ReturnType<typeof setTimeout> | undefined,
+  });
+  const nowRef = useRef(now);
+  useEffect(() => {
+    nowRef.current = now;
+  }, [now]);
+  // Where the next load should start; set by retry / audio switch, read once by the load effect.
+  const startOverride = useRef<number | null>(null);
 
-  const show = useSharedValue(visible ? 1 : 0);
-  // TV: the OSD reads the page's once-a-second 'tick' straight from here.
+  const player = useVideoPlayer(null, (p) => {
+    p.timeUpdateEventInterval = 0.25;
+    p.loop = false;
+  });
+
+  const show = useSharedValue(0);
   const feedRef = useRef<((t: Tick) => void) | null>(null);
 
-  // Becoming visible: rotate, go immersive, and start playback if it was preloaded.
+  function setPhaseBoth(p: Phase) {
+    run.current.phase = p;
+    setPhase(p);
+  }
+
+  /** Clear the screen for a fresh load (the load effect itself only touches refs). */
+  function reset() {
+    setCue('');
+    setSkip(null);
+    setProblem(null);
+    setPhaseBoth('resolving');
+  }
+
+  // On screen: rotate, go immersive, keep the screen on, and let Back close the player.
   useEffect(() => {
-    if (!visible) return;
     show.set(withTiming(1, { duration: 260, easing: Easing.out(Easing.cubic) }));
     // A TV is already landscape (and some boxes would honour a portrait lock, sideways).
     if (!isTV) ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
     activateKeepAwakeAsync('player');
-    web.current?.injectJavaScript(revealScript(session.startAt));
     const back = BackHandler.addEventListener('hardwareBackPress', () => {
       exit();
       return true;
     });
+    const r = run.current;
     return () => {
+      clearTimeout(r.timer);
       back.remove();
       deactivateKeepAwake('player');
       if (!isTV) {
@@ -104,290 +145,364 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
       }
       queryClient.invalidateQueries({ queryKey: ['episodes', session.showId] });
     };
-  }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // If the page never reports a playable video, show it anyway so a captcha or error is visible.
-  // (Not while Cloudflare's check is up: that has its own way of being shown.)
+  // Find and start a stream for the episode on screen (again, after a retry or an audio switch).
   useEffect(() => {
-    if (ready || !visible || gate) return;
-    const id = setTimeout(() => setReady(true), READY_TIMEOUT);
-    return () => clearTimeout(id);
-  }, [ready, attempt, visible, gate]);
+    const r = run.current;
+    const token = ++r.token;
+    clearTimeout(r.timer);
+    r.startAt = startOverride.current ?? Math.floor(resumePoint(useStore.getState().progress[now.id]));
+    startOverride.current = null;
+    r.retried = false;
+    r.cues = [];
+    r.cue = '';
+    r.skipKey = '';
+    r.phase = 'resolving';
+    player.pause();
 
-  // Cloudflare's check: keep the loader over it for a grace period, then show the page as it is.
-  useEffect(() => {
-    if (!gate || !visible) return;
-    const id = setTimeout(() => setGateOpen(true), GATE_GRACE);
-    return () => {
-      clearTimeout(id);
-      setGateOpen(false);
+    (async () => {
+      const res = await resolveEpisode(session.showId, now.number);
+      if (token !== r.token) return;
+      r.resolved = res;
+      let used: Audio = audio;
+      let list = candidates(res.play, res.config, res.env, audio, lastGood.get(session.showId));
+      if (!list.length) {
+        const other: Audio = audio === 'sub' ? 'dub' : 'sub';
+        list = candidates(res.play, res.config, res.env, other, lastGood.get(session.showId));
+        if (list.length) {
+          used = other;
+          say(other === 'dub' ? 'No subbed stream for this one, so it’s the dub' : 'No dub for this one, so it’s subbed');
+        }
+      }
+      r.audioUsed = used;
+      if (!list.length) return fail({ kind: 'stream', tried: 0, other: null });
+      // Check the first few at once; ones that don't answer go to the back of the queue.
+      const head = list.slice(0, PROBE_FIRST);
+      const alive = await Promise.all(head.map((c) => probe(c)));
+      if (token !== r.token) return;
+      r.list = [...head.filter((_, i) => alive[i]), ...list.slice(PROBE_FIRST), ...head.filter((_, i) => !alive[i])];
+      start(0);
+    })().catch((e: unknown) => {
+      if (token !== r.token) return;
+      fail(classify(e));
+    });
+  }, [now.id, load, audio]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function classify(e: unknown): Problem {
+    if (e instanceof UnmatchedError) return { kind: 'unmatched' };
+    if (e instanceof MissingEpisodeError) return { kind: 'episode', available: e.available };
+    if (e instanceof MiruroError) {
+      if (e.status === 429) usePlayer.getState().backOff();
+      if (e.kind === 'blocked') return { kind: 'blocked' };
+      if (e.kind === 'network' || e.kind === 'timeout') return { kind: 'network' };
+      return { kind: 'api', text: e.message };
+    }
+    return { kind: 'network' };
+  }
+
+  function fail(p: Problem) {
+    clearTimeout(run.current.timer);
+    player.pause();
+    haptics.notify(NotificationFeedbackType.Warning);
+    setProblem(p);
+    setPhaseBoth('problem');
+  }
+
+  /** Hand candidate `i` to the player; if it doesn't start in time, the next one gets its turn. */
+  function start(i: number) {
+    const r = run.current;
+    const c = r.list[i];
+    if (!c) {
+      const other: Audio = r.audioUsed === 'sub' ? 'dub' : 'sub';
+      return fail({ kind: 'stream', tried: r.list.length, other: r.resolved && hasAudio(r.resolved.play, other) ? other : null });
+    }
+    const token = r.token;
+    r.index = i;
+    r.seeked = false;
+    setPhaseBoth('starting');
+    clearTimeout(r.timer);
+    r.timer = setTimeout(() => {
+      if (token === r.token && r.phase === 'starting' && r.index === i) start(i + 1);
+    }, START_TIMEOUT);
+    player
+      .replaceAsync({ uri: c.uri, headers: c.headers, contentType: 'hls', metadata: { title: session.showName, artist: `Episode ${nowRef.current.number}` } })
+      .then(() => {
+        if (token === r.token && r.index === i) player.play();
+      })
+      .catch(() => {
+        if (token === r.token && r.index === i) start(i + 1);
+      });
+    loadSubtitles(c, token);
+  }
+
+  function loadSubtitles(c: Candidate, token: number) {
+    const r = run.current;
+    r.subs = usableSubtitles(c.subtitles);
+    r.cues = [];
+    const first = defaultSubtitle(r.subs);
+    r.subIndex = useStore.getState().prefs.subs && first ? r.subs.indexOf(first) : -1;
+    if (r.subIndex >= 0) fetchCues(r.subIndex, c, token);
+  }
+
+  async function fetchCues(index: number, c: Candidate, token: number) {
+    const r = run.current;
+    const sub = r.subs[index];
+    const env = r.resolved?.env;
+    if (!sub) return;
+    // The file itself first (as the API lists it), then through miruro's proxy as its site does.
+    const tries: { uri: string; headers?: Record<string, string> }[] = [{ uri: sub.file, headers: c.headers }];
+    if (env) tries.push({ uri: proxyUrl(env.a, env.key, sub.file, c.headers ?? null, '/sub.vtt') });
+    for (const t of tries) {
+      const ctrl = new AbortController();
+      const id = setTimeout(() => ctrl.abort(), 8000);
+      try {
+        const res = await fetch(t.uri, { headers: t.headers, signal: ctrl.signal });
+        if (!res.ok) continue;
+        const cues = parseCues(await res.text());
+        if (token !== r.token || r.subIndex !== index) return;
+        if (cues.length) {
+          r.cues = cues;
+          return;
+        }
+      } catch {
+        // Try the next way.
+      } finally {
+        clearTimeout(id);
+      }
+    }
+    if (token === r.token && r.subIndex === index) say('Couldn’t load those subtitles');
+  }
+
+  useEventListener(player, 'statusChange', ({ status }) => {
+    const r = run.current;
+    if (status === 'readyToPlay') {
+      if (r.phase === 'starting') {
+        clearTimeout(r.timer);
+        const c = r.list[r.index];
+        if (c) lastGood.set(session.showId, { provider: c.provider, server: c.server });
+        setPhaseBoth('playing');
+      }
+      if (!r.seeked) {
+        r.seeked = true;
+        if (r.startAt > 0) player.currentTime = r.startAt;
+        player.play();
+      }
+    } else if (status === 'error') {
+      if (r.phase === 'playing' && !r.retried) {
+        // A hiccup mid-episode: the same stream once more from where it got to, then the next.
+        r.retried = true;
+        r.startAt = player.currentTime;
+        start(r.index);
+      } else if (r.phase === 'starting' || r.phase === 'playing') {
+        r.startAt = Math.max(r.startAt, player.currentTime || 0);
+        start(r.index + 1);
+      }
+    }
+    pushTick();
+  });
+
+  useEventListener(player, 'playingChange', () => pushTick());
+
+  useEventListener(player, 'timeUpdate', ({ currentTime }) => {
+    const r = run.current;
+    pushTick(currentTime);
+    const text = r.subIndex >= 0 ? cueAt(r.cues, currentTime) : '';
+    if (text !== r.cue) {
+      r.cue = text;
+      setCue(text);
+    }
+    const window = r.resolved?.episode.skip_times?.find((s) => currentTime >= s.start_seconds && currentTime < s.end_seconds - 2);
+    const key = window ? `${window.kind}:${window.end_seconds}` : '';
+    if (key !== r.skipKey) {
+      r.skipKey = key;
+      setSkip(window ? { label: window.kind === 'ed' ? 'Skip ending' : window.kind === 'op' ? 'Skip intro' : 'Skip', to: window.end_seconds } : null);
+    }
+    if (Math.abs(currentTime - r.savedAt) >= SAVE_EVERY) save(currentTime);
+  });
+
+  useEventListener(player, 'playToEnd', () => {
+    save(player.duration);
+    jump(1, true);
+  });
+
+  function save(t = player.currentTime) {
+    const d = player.duration;
+    if (run.current.phase !== 'playing' || !d || !Number.isFinite(d) || !Number.isFinite(t)) return;
+    run.current.savedAt = t;
+    const cur = nowRef.current;
+    recordProgress(session.showId, { id: cur.id, slug: cur.slug, number: cur.number }, t, d);
+  }
+
+  function labels() {
+    const r = run.current;
+    const sub = r.subIndex >= 0 ? r.subs[r.subIndex] : undefined;
+    return {
+      audio: r.resolved ? (r.audioUsed === 'dub' ? 'Dub' : 'Sub') : null,
+      subs: r.subs.length ? (sub ? sub.label : 'Off') : null,
     };
-  }, [gate, visible]);
+  }
 
-  // TV: hand the remote to the page so it can reach the check's box.
-  useEffect(() => {
-    if (isTV && gateOpen) web.current?.requestFocus();
-  }, [gateOpen]);
+  function pushTick(t = player.currentTime) {
+    const { audio: a, subs } = labels();
+    feedRef.current?.({
+      t: t || 0,
+      d: Number.isFinite(player.duration) ? player.duration : 0,
+      paused: !player.playing,
+      buffering: player.status === 'loading',
+      audio: a,
+      subs,
+      fill: run.current.fill,
+    });
+  }
+
+  function say(text: string) {
+    haptics.selection();
+    setToast({ text, key: Date.now() });
+  }
 
   function exit() {
-    // Black out the page first: pausing makes the site flash its own overlays. Rotate back to
-    // portrait behind the black, then fade out.
+    save();
     setClosing(true);
+    player.pause();
     if (!isTV) ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-    requestAnimationFrame(() => web.current?.injectJavaScript(flushScript));
-    show.set(withDelay(240, withTiming(0, { duration: 200 }, (done) => done && scheduleOnRN(close))));
+    show.set(withDelay(120, withTiming(0, { duration: 200 }, (done) => done && scheduleOnRN(close))));
   }
 
-  /** Reload the episode on screen, picking up where it got to. */
+  /** Look the episode up again (stream links expire) and pick up where it got to. */
   function retry() {
-    const cur = now.current;
-    const t = Math.floor(resumePoint(useStore.getState().progress[cur.id]));
-    pageUrl.current = `https://anime.nexus/watch/${cur.id}/${cur.slug}`;
-    setProblem(null);
-    setFailed(false);
-    setVerifying(false);
-    setGate(false);
-    setGateOpen(false);
-    checks.current = 0;
-    setReady(false);
-    setTarget({ id: cur.id, slug: cur.slug, t });
-    setAttempt((n) => n + 1);
+    const r = run.current;
+    const link = r.resolved?.link;
+    if (link && r.resolved) queryClient.removeQueries({ queryKey: q.play(link.miruro, r.resolved.episode.episode_number).queryKey });
+    startOverride.current = r.phase === 'playing' || r.seeked ? Math.floor(player.currentTime) : null;
+    reset();
+    setLoad((n) => n + 1);
   }
 
-  /** Only ever on an explicit tap: the episode on anime.nexus in the phone's browser. */
-  function openBrowser() {
-    Linking.openURL(watchUrl(now.current)).catch(() => {});
-  }
-
-  /** Next / previous episode from the remote: load it in place, picking up where it was left. */
-  async function jump(step: 1 | -1) {
-    const cur = now.current;
+  /** Next / previous episode: load it in place, picking up where it was left. */
+  async function jump(step: 1 | -1, auto = false) {
+    const cur = nowRef.current;
     const ep = await findEpisode(session.showId, cur.number + step).catch(() => undefined);
     if (!ep) {
-      setToast({ text: step > 0 ? 'That’s the latest episode' : 'This is the first episode', key: Date.now() });
+      say(step > 0 ? 'That’s the latest episode' : 'This is the first episode');
       return;
     }
-    web.current?.injectJavaScript(flushScript);
+    if (!auto) save();
     const entry = useStore.getState().history[session.showId];
     if (entry) useStore.getState().recordPlay(entry.show, ep);
-    now.current = { id: ep.id, slug: ep.slug, number: ep.number };
-    pageUrl.current = `https://anime.nexus/watch/${ep.id}/${ep.slug}`;
-    setEpisode({ number: String(ep.number), title: ep.title ?? '' });
-    setProblem(null);
-    setFailed(false);
-    setVerifying(false);
-    setGate(false);
-    setGateOpen(false);
-    checks.current = 0;
-    setReady(false);
-    setTarget({ id: ep.id, slug: ep.slug, t: Math.floor(resumePoint(useStore.getState().progress[ep.id])) });
-    setAttempt((n) => n + 1);
+    if (auto) say(`Up next: Episode ${ep.number}`);
+    reset();
+    setNow({ id: ep.id, slug: ep.slug, number: ep.number, title: ep.title ?? '' });
   }
 
-  const command = (cmd: TvCommand, arg?: number) => web.current?.injectJavaScript(tvCommandScript(cmd, arg));
-
-  /** Close the player and open the anime.nexus account screen; playback resumes after sign-in. */
-  function signIn() {
-    const cur = now.current;
-    usePlayer.getState().setResume({
-      ...session,
-      episodeId: cur.id,
-      slug: cur.slug,
-      number: cur.number,
-      title: cur.id === session.episodeId ? session.title : '',
-      startAt: Math.floor(resumePoint(useStore.getState().progress[cur.id])),
-    });
-    exit();
-    router.push('/account');
-  }
-
-  function onMessage(e: WebViewMessageEvent) {
-    let msg: { type: string; id?: string; slug?: string; number?: number; t?: number; d?: number; text?: string; kind?: string; on?: boolean; status?: number; blocked?: string[] } & Partial<Tick>;
-    try {
-      msg = JSON.parse(e.nativeEvent.data);
-    } catch {
+  function switchAudio(to?: Audio) {
+    const next: Audio = to ?? (run.current.audioUsed === 'sub' ? 'dub' : 'sub');
+    if (run.current.resolved && !hasAudio(run.current.resolved.play, next)) {
+      say(next === 'dub' ? 'No dub for this episode' : 'No subbed stream for this episode');
       return;
     }
-    if (msg.type === 'ready') {
-      setReady(true);
-      setGate(false);
-      checks.current = 0;
-    }
-    if (msg.type === 'gate') {
-      onGate(msg.kind, msg.status ?? 0, msg.text);
-      return;
-    }
-    if (msg.type === 'close') exit();
-    if (msg.type === 'loading') {
-      setReady(false);
-      if (msg.number) setEpisode({ number: String(msg.number), title: '' });
-    }
-    if (msg.type === 'tick') {
-      feedRef.current?.({ t: msg.t ?? 0, d: msg.d ?? 0, paused: !!msg.paused, buffering: !!msg.buffering, audio: msg.audio ?? null, subs: msg.subs ?? null, fill: !!msg.fill });
-      return;
-    }
-    if (msg.type === 'toast' && msg.text) {
-      haptics.selection();
-      setToast({ text: msg.text, key: Date.now() });
-    }
-    if (msg.type === 'progress' && msg.id && msg.slug && msg.d && Number.isFinite(msg.d)) {
-      recordProgress(session.showId, { id: msg.id, slug: msg.slug, number: msg.number }, msg.t ?? 0, msg.d);
-      now.current = { id: msg.id, slug: msg.slug, number: msg.number ?? now.current.number };
-      if (msg.id !== session.episodeId && msg.number) setEpisode({ number: String(msg.number), title: '' });
-    }
-    if (msg.type === 'verify') {
-      setVerifying(!!msg.on);
-      // TV: hand the remote to the page so it can reach the check (the script focuses it).
-      if (isTV && msg.on) setTimeout(() => web.current?.requestFocus(), 50);
-    }
-    if (msg.type === 'signin') signIn();
-    if (msg.type === 'problem' && msg.text) {
-      // The site is refusing streams for now; stop preloading so we don't make it worse.
-      usePlayer.getState().backOff();
-      if (msg.kind === 'auth') web.current?.injectJavaScript(pauseScript);
-      haptics.notify(NotificationFeedbackType.Warning);
-      setProblem({ kind: msg.kind === 'auth' ? 'auth' : 'stream', text: msg.text, blocked: msg.blocked });
-    }
+    startOverride.current = run.current.seeked ? Math.floor(player.currentTime) : null;
+    reset();
+    if (next === useStore.getState().prefs.audio) setLoad((n) => n + 1);
+    else useStore.getState().setPrefs({ audio: next });
   }
 
-  /**
-   * What the page script's gate saw (see inject.ts). Cloudflare's check page is left to itself:
-   * Kitsune only waits, shows it if it needs a tap, and plays the episode once it's through.
-   */
-  function onGate(kind: string | undefined, status: number, text?: string) {
-    if (kind === 'none') {
-      // Through the check: keep the loader over the real page until it plays.
-      if (gate) {
-        setGate(false);
-        setReady(false);
-      }
-    } else if (kind === 'check') {
-      checks.current += 1;
-      if (checks.current > MAX_CHECKS) {
-        setGate(false);
-        // No text: this one is Kitsune's own conclusion, not something the site said.
-        setProblem({ kind: 'blocked', text: '' });
-        return;
-      }
-      setFailed(false);
-      setReady(false);
-      setGate(true);
-    } else if (kind === 'refused' && status < 500) {
-      // (5xx is a server hiccup: onHttpError shows the retry screen for that.)
-      usePlayer.getState().backOff();
-      setGate(false);
-      if (!visible) {
-        close();
-        return;
-      }
-      haptics.notify(NotificationFeedbackType.Warning);
-      setProblem({ kind: 'blocked', text: text || `HTTP ${status}` });
-    }
+  function cycleSubs() {
+    const r = run.current;
+    if (!r.subs.length) return;
+    r.subIndex = r.subIndex + 1 >= r.subs.length ? -1 : r.subIndex + 1;
+    r.cues = [];
+    useStore.getState().setPrefs({ subs: r.subIndex >= 0 });
+    const c = r.list[r.index];
+    if (r.subIndex >= 0 && c) fetchCues(r.subIndex, c, r.token);
+    say(r.subIndex >= 0 ? `Subtitles: ${r.subs[r.subIndex].label}` : 'Subtitles off');
+    pushTick();
   }
 
-  // Only top-level navigation is fenced in; ad iframes are already stopped inside the page.
-  function allow(req: ShouldStartLoadRequest) {
-    if (req.isTopFrame === false) return true;
-    try {
-      return ALLOWED.test(new URL(req.url).hostname) || req.url.startsWith('about:') || req.url.startsWith('blob:');
-    } catch {
-      return false;
+  const command = (cmd: TvCommand, arg = 0) => {
+    switch (cmd) {
+      case 'toggle':
+        if (player.playing) player.pause();
+        else player.play();
+        break;
+      case 'play':
+        player.play();
+        break;
+      case 'pause':
+        player.pause();
+        break;
+      case 'seek':
+        player.seekBy(arg);
+        break;
+      case 'seekTo':
+        player.currentTime = arg;
+        break;
+      case 'audio':
+        switchAudio();
+        break;
+      case 'subs':
+        cycleSubs();
+        break;
+      case 'fill':
+        run.current.fill = !run.current.fill;
+        setFill(run.current.fill);
+        break;
     }
-  }
+    pushTick();
+  };
 
-  // The site's in-player verify box, or Cloudflare's check page: the page has the screen to itself.
-  const checking = verifying || gateOpen;
+  const skipNow = () => {
+    if (!skip) return;
+    player.currentTime = skip.to;
+    haptics.selection();
+  };
+
   const layer = useAnimatedStyle(() => ({ opacity: show.value, transform: [{ scale: 1.04 - show.value * 0.04 }] }));
+  const playing = phase === 'playing' && !closing;
+  const episodeLabel = `Episode ${now.number}`;
 
   return (
-    <Animated.View pointerEvents={visible ? 'auto' : 'none'} style={[StyleSheet.absoluteFill, styles.root, layer]}>
-      {visible ? (
-        <>
-          <StatusBar hidden />
-          <NavigationBar hidden />
-        </>
-      ) : null}
-      <FocusBlock enabled={checking} style={styles.web}>
-        <WebView<object>
-          key={attempt}
-          ref={web}
-          source={{ uri }}
-          style={styles.web}
-          containerStyle={[styles.web, closing && styles.hidden]}
-          injectedJavaScriptBeforeContentLoaded={script}
-          injectedJavaScriptBeforeContentLoadedForMainFrameOnly
-          onMessage={onMessage}
-          onLoadStart={(e) => {
-            inject();
-            // A full page load to another episode: cover it with the loader until it plays. (The
-            // same episode at another address, e.g. a redirect, keeps what we know about it.)
-            const url = e.nativeEvent.url;
-            if (url !== pageUrl.current && url.includes('/watch/')) {
-              pageUrl.current = url;
-              const id = url.match(/\/watch\/([^/?#]+)/)?.[1];
-              if (id !== now.current.id) {
-                setReady(false);
-                setEpisode({ number: '', title: '' });
-              }
-            }
-          }}
-          onLoadProgress={inject}
-          onLoadEnd={inject}
-          onShouldStartLoadWithRequest={allow}
-          setSupportMultipleWindows
-          onOpenWindow={() => {
-            /* popups go nowhere */
-          }}
-          javaScriptCanOpenWindowsAutomatically={false}
-          allowsFullscreenVideo
-          allowsInlineMediaPlayback
-          mediaPlaybackRequiresUserAction={false}
-          thirdPartyCookiesEnabled
-          sharedCookiesEnabled
-          domStorageEnabled
-          setBuiltInZoomControls={false}
-          overScrollMode="never"
-          androidLayerType="hardware"
-          webviewDebuggingEnabled={__DEV__}
-          onError={() => setFailed(true)}
-          // A 4xx is often Cloudflare's check (served as 403); the page script's gate sorts that out.
-          onHttpError={(e: WebViewHttpErrorEvent) => {
-            if (e.nativeEvent.statusCode >= 500) setFailed(true);
-          }}
-          onRenderProcessGone={() => {
-            setReady(false);
-            setAttempt((n) => n + 1);
-          }}
-        />
-      </FocusBlock>
-      {visible && (!ready || failed) && !checking && !problem ? (
-        <Loader name={session.showName} number={episode.number} title={episode.title} thumb={session.thumb} failed={failed} onRetry={retry} />
-      ) : null}
-      {isTV && visible && ready && !failed && !problem && !checking && !closing ? (
-        <PlayerOsd
-          title={session.showName}
-          episode={episode.number ? `Episode ${episode.number}` : 'Now playing'}
-          feedRef={feedRef}
-          onCommand={command}
-          onJump={jump}
-          onExit={exit}
-        />
-      ) : null}
-      {isTV && visible && checking && !problem ? (
-        <View pointerEvents="none" style={styles.verifyHint}>
-          <T variant="label">Use the remote to tick the box  ·  Back to leave</T>
+    <Animated.View style={[StyleSheet.absoluteFill, styles.root, layer]}>
+      <StatusBar hidden />
+      <NavigationBar hidden />
+      <VideoView
+        player={player}
+        style={[styles.video, closing && styles.hidden]}
+        nativeControls={false}
+        contentFit={fill ? 'cover' : 'contain'}
+        fullscreenOptions={{ enable: false }}
+        allowsPictureInPicture={false}
+        focusable={false}
+      />
+      {cue && playing ? (
+        <View pointerEvents="none" style={styles.cueWrap}>
+          <T style={styles.cue}>{cue}</T>
         </View>
       ) : null}
-      {!isTV && visible && gateOpen && !problem ? (
-        <View pointerEvents="none" style={styles.verifyHint}>
-          <T variant="label">anime.nexus is checking your connection  ·  your episode starts right after</T>
-        </View>
+      {playing && isTV ? (
+        <PlayerOsd title={session.showName} episode={episodeLabel} feedRef={feedRef} onCommand={command} onJump={jump} onExit={exit} skip={skip?.label} onSkip={skipNow} />
       ) : null}
-      {visible && problem ? <Problem kind={problem.kind} text={problem.text} blocked={problem.blocked} onRetry={retry} onSignIn={signIn} onBrowser={openBrowser} /> : null}
-      {toast && !problem ? <Toast key={toast.key} text={toast.text} onDone={() => setToast(null)} /> : null}
+      {playing && !isTV ? <PhoneControls title={session.showName} episode={episodeLabel} feedRef={feedRef} onCommand={command} onJump={jump} onExit={exit} /> : null}
+      {playing && skip ? (
+        isTV ? (
+          <View pointerEvents="none" style={[styles.skip, styles.skipTv]}>
+            <T variant="label">▲ {skip.label}</T>
+          </View>
+        ) : (
+          <Pressable accessibilityRole="button" onPress={skipNow} style={({ pressed }) => [styles.skip, pressed && { opacity: 0.7 }]}>
+            <T variant="label">{skip.label}</T>
+            <Icon name="skip-forward" size={18} tint={color.text} />
+          </Pressable>
+        )
+      ) : null}
+      {(phase === 'resolving' || phase === 'starting') && !closing ? (
+        <Loader name={session.showName} number={now.number} title={now.title} thumb={session.thumb} step={phase} />
+      ) : null}
+      {problem && !closing ? <ProblemScreen problem={problem} number={now.number} onRetry={retry} onSwitch={switchAudio} onExit={exit} /> : null}
+      {toast ? <Toast key={toast.key} text={toast.text} onDone={() => setToast(null)} /> : null}
       {closing ? <View style={[StyleSheet.absoluteFill, styles.blackout]} /> : null}
       {/* A TV has a Back key; a focusable button here would only steal the remote. */}
-      {!isTV && visible && !closing && (!ready || failed || checking || problem) ? (
+      {!isTV && !closing && !playing ? (
         <View style={styles.back}>
           <IconButton icon="arrow-left" label="Close player" variant="scrim" onPress={exit} />
         </View>
@@ -400,72 +515,74 @@ function Player({ session, visible }: { session: Session; visible: boolean }) {
 function Toast({ text, onDone }: { text: string; onDone: () => void }) {
   const t = useSharedValue(0);
   useEffect(() => {
-    t.set(withSequence(withSpring(1, spring.snappy), withDelay(1100, withTiming(0, { duration: 220 }, (done) => done && scheduleOnRN(onDone)))));
+    t.set(withSequence(withSpring(1, spring.snappy), withDelay(1400, withTiming(0, { duration: 220 }, (done) => done && scheduleOnRN(onDone)))));
   }, [t, onDone]);
   const style = useAnimatedStyle(() => ({ opacity: t.value, transform: [{ translateY: (1 - t.value) * 24 }] }));
   return (
     <Animated.View pointerEvents="none" style={[styles.toastWrap, style]}>
       <View style={styles.toast}>
-        <T variant="label">
-          {text}
-        </T>
+        <T variant="label">{text}</T>
       </View>
     </Animated.View>
   );
 }
 
-/** The site refused or paused the stream: say why in plain words and offer the way forward. */
-function Problem({ kind, text, blocked, onRetry, onSignIn, onBrowser }: { kind: 'auth' | 'stream' | 'blocked'; text: string; blocked?: string[]; onRetry: () => void; onSignIn: () => void; onBrowser: () => void }) {
-  const auth = kind === 'auth';
-  if (kind === 'blocked') {
-    return (
-      <View style={[StyleSheet.absoluteFill, styles.loader]}>
-        <View style={styles.problem}>
-          <Icon name="alert-circle-outline" size={36} tint={color.accent} />
-          <T variant="title" style={styles.cardTitle}>
-            anime.nexus didn’t open this episode
-          </T>
-          <T dim style={styles.problemBody}>
-            {text
-              ? 'anime.nexus answered with an error instead of the episode. That’s usually temporary, so give it a moment and try again.'
-              : 'anime.nexus’s security check kept coming back instead of letting the episode through. Give it a moment and try again.'}
-          </T>
-          <View style={styles.problemActions}>
-            <Button label="Try again" icon="refresh" size="sm" hasTVPreferredFocus onPress={onRetry} />
-            {/* The only way into a browser, and only on a tap (a TV has none). */}
-            {isTV ? null : <Button label="Open in browser" variant="secondary" size="sm" onPress={onBrowser} />}
-          </View>
-          {text ? (
-            <T variant="caption" faint numberOfLines={2} style={styles.problemNote}>
-              anime.nexus says: “{text}”
-            </T>
-          ) : null}
-        </View>
-      </View>
-    );
+/** Why the episode isn't playing, in plain words, and the way forward. */
+function ProblemScreen({ problem, number, onRetry, onSwitch, onExit }: { problem: Problem; number: number; onRetry: () => void; onSwitch: (to: Audio) => void; onExit: () => void }) {
+  let title = '';
+  let body = '';
+  let note = '';
+  let canRetry = true;
+  switch (problem.kind) {
+    case 'unmatched':
+      title = 'Couldn’t find this show on miruro.cx';
+      body = 'Kitsune finds each show on miruro.cx by its title and year, and this one didn’t match closely enough to be sure, so it can’t play yet.';
+      canRetry = false;
+      break;
+    case 'episode':
+      title = `Episode ${number} isn’t on miruro.cx yet`;
+      body = problem.available
+        ? `miruro.cx lists ${problem.available} episode${problem.available === 1 ? '' : 's'} for this show. New ones usually appear there within a few hours of airing.`
+        : 'miruro.cx doesn’t list any episodes for this show yet.';
+      break;
+    case 'stream':
+      title = 'No working stream for this episode';
+      body = problem.tried
+        ? `Kitsune tried ${problem.tried} stream${problem.tried === 1 ? '' : 's'} from miruro.cx and none of them started. That’s usually temporary, so give it a minute and try again.`
+        : 'miruro.cx has no streams for this episode right now. Give it a while and try again.';
+      break;
+    case 'blocked':
+      title = 'miruro.cx didn’t let Kitsune through';
+      body = 'miruro.cx’s security check kept coming back instead of letting the episode through. Give it a moment and try again.';
+      break;
+    case 'network':
+      title = 'Couldn’t reach miruro.cx';
+      body = 'Check your connection, then try again.';
+      break;
+    case 'api':
+      title = 'miruro.cx answered with an error';
+      body = 'That’s usually temporary, so give it a moment and try again.';
+      note = `miruro.cx says: “${problem.text}”`;
+      break;
   }
+  const other = problem.kind === 'stream' ? problem.other : null;
   return (
     <View style={[StyleSheet.absoluteFill, styles.loader]}>
       <View style={styles.problem}>
-        <Icon name={auth ? 'account-lock-outline' : 'alert-circle-outline'} size={36} tint={color.accent} />
+        <Icon name="alert-circle-outline" size={36} tint={color.accent} />
         <T variant="title" style={styles.cardTitle}>
-          {auth ? 'Sign in to keep watching' : 'This episode won’t start right now'}
+          {title}
         </T>
         <T dim style={styles.problemBody}>
-          {auth
-            ? 'anime.nexus paused this stream and wants you signed in. Sign in once with your anime.nexus account and Kitsune picks up right where you left off.'
-            : 'anime.nexus couldn’t start the stream. That’s usually a short limit on their side, so give it a minute and try again. Signing in to anime.nexus helps too.'}
+          {body}
         </T>
         <View style={styles.problemActions}>
-          <Button label={auth ? 'Sign in' : 'Try again'} icon={auth ? 'login' : 'refresh'} size="sm" hasTVPreferredFocus onPress={auth ? onSignIn : onRetry} />
-          <Button label={auth ? 'Try again' : 'Sign in'} variant="secondary" size="sm" onPress={auth ? onRetry : onSignIn} />
+          {canRetry ? <Button label="Try again" icon="refresh" size="sm" hasTVPreferredFocus onPress={onRetry} /> : <Button label="Back to the show" icon="arrow-left" size="sm" hasTVPreferredFocus onPress={onExit} />}
+          {other ? <Button label={other === 'dub' ? 'Play the dub' : 'Play subbed'} icon="translate" variant="secondary" size="sm" onPress={() => onSwitch(other)} /> : null}
         </View>
-        <T variant="caption" faint numberOfLines={2} style={styles.problemNote}>
-          anime.nexus says: “{text}”
-        </T>
-        {blocked?.length ? (
-          <T variant="caption" faint numberOfLines={2} style={{ marginTop: 4, textAlign: 'center' }}>
-            Kitsune held back: {blocked.join(', ')}
+        {note ? (
+          <T variant="caption" faint numberOfLines={2} style={styles.problemNote}>
+            {note}
           </T>
         ) : null}
       </View>
@@ -473,25 +590,27 @@ function Problem({ kind, text, blocked, onRetry, onSignIn, onBrowser }: { kind: 
   );
 }
 
-function Loader({ name, number, title, thumb, failed, onRetry }: { name: string; number: string; title: string; thumb?: string; failed: boolean; onRetry: () => void }) {
+function Loader({ name, number, title, thumb, step }: { name: string; number: number; title: string; thumb?: string; step: 'resolving' | 'starting' }) {
   return (
     <View style={[StyleSheet.absoluteFill, styles.loader]}>
       {thumb ? <Image source={{ uri: thumb }} blurRadius={18} contentFit="cover" style={[StyleSheet.absoluteFill, { opacity: 0.45 }]} /> : null}
       <LinearGradient colors={['rgba(0,0,0,0.45)', 'rgba(0,0,0,0.94)']} style={StyleSheet.absoluteFill} />
       <View style={styles.card}>
-        {failed ? null : <Spinner size={44} />}
-        <T variant="micro" color={color.accent} style={{ marginTop: failed ? 0 : 22 }}>
-          {failed ? 'Connection hiccup' : number ? `Episode ${number}` : 'Up next'}
+        <Spinner size={44} />
+        <T variant="micro" color={color.accent} style={{ marginTop: 22 }}>
+          {`Episode ${number}`}
         </T>
         <T variant="title" numberOfLines={2} style={styles.cardTitle}>
           {name}
         </T>
-        {title && !failed ? (
+        {title ? (
           <T dim numberOfLines={1} style={{ marginTop: 2 }}>
             {title}
           </T>
         ) : null}
-        {failed ? <Button label="Try again" icon="refresh" size="sm" hasTVPreferredFocus onPress={onRetry} style={{ marginTop: 20 }} /> : null}
+        <T variant="caption" faint style={{ marginTop: 10 }}>
+          {step === 'resolving' ? 'Finding the episode…' : 'Starting the stream…'}
+        </T>
       </View>
     </View>
   );
@@ -499,19 +618,43 @@ function Loader({ name, number, title, thumb, failed, onRetry }: { name: string;
 
 const styles = StyleSheet.create({
   root: { backgroundColor: '#000', zIndex: 100 },
-  web: { flex: 1, backgroundColor: '#000' },
+  video: { flex: 1, backgroundColor: '#000' },
   loader: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' },
   card: { width: 360, alignItems: 'center' },
   cardTitle: { marginTop: 6, textAlign: 'center' },
   back: { position: 'absolute', top: 16, left: 16 },
   blackout: { backgroundColor: '#000' },
   hidden: { opacity: 0 },
-  problem: { width: 460, maxWidth: '90%', alignItems: 'center' },
+  problem: { width: 480, maxWidth: '90%', alignItems: 'center' },
   problemBody: { marginTop: 8, textAlign: 'center', lineHeight: 21 },
   problemActions: { flexDirection: 'row', gap: 10, marginTop: 18 },
   problemNote: { marginTop: 14, textAlign: 'center' },
+  cueWrap: { position: 'absolute', left: '8%', right: '8%', bottom: isTV ? tv(70) : 54, alignItems: 'center' },
+  cue: {
+    fontSize: isTV ? tv(26) : 19,
+    lineHeight: isTV ? tv(34) : 25,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.95)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  skip: {
+    position: 'absolute',
+    right: isTV ? tv(48) : 24,
+    bottom: isTV ? tv(150) : 64,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: tv(18),
+    paddingVertical: tv(10),
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(28,28,32,0.92)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.line,
+  },
+  skipTv: { bottom: tv(170) },
   toastWrap: { position: 'absolute', bottom: 24, alignSelf: 'center' },
-  verifyHint: { position: 'absolute', bottom: tv(28), alignSelf: 'center', paddingHorizontal: tv(18), paddingVertical: tv(10), borderRadius: radius.pill, backgroundColor: 'rgba(28,28,32,0.95)' },
   toast: { paddingHorizontal: 18, paddingVertical: 11, borderRadius: radius.pill, backgroundColor: 'rgba(28,28,32,0.95)', borderWidth: StyleSheet.hairlineWidth, borderColor: color.line },
 });
-

@@ -11,6 +11,7 @@ import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { iconFont } from '@/components/Icon';
 import { Intro } from '@/components/Intro';
+import { MiruroBridge } from '@/components/MiruroBridge';
 import { PlayerHost } from '@/components/Player';
 import { UpdateSheet } from '@/components/UpdateSheet';
 import { queryClient } from '@/lib/queries';
@@ -63,6 +64,7 @@ export default function RootLayout() {
         </Stack>
         <UpdateSheet />
         <PlayerHost />
+        <MiruroBridge />
         <Intro ready={restored && fonts} />
       </PersistQueryClientProvider>
     </GestureHandlerRootView>

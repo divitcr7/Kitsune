@@ -25,6 +25,8 @@
     "expo-splash-screen": "~58.0.12",
     "expo-status-bar": "~58.0.4",
     "expo-system-ui": "~58.0.7",
+    "expo-video": "~58.0.14",
+    "fflate": "^0.8.2",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-native": "npm:react-native-tvos@0.88.0-0",
@@ -49,7 +51,7 @@
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
-    "typecheck": "tsc --noEmit && tsc -p tv/tizen --noEmit && node --no-warnings scripts/check-player-script.mjs",
+    "typecheck": "tsc --noEmit && tsc -p tv/tizen --noEmit && node --no-warnings scripts/check-player-script.mjs && node --no-warnings scripts/check-miruro.mjs",
     "lint": "expo lint",
     "build:apk": "bash scripts/build-apk.sh",
     "build:tizen": "node tv/tizen/build.mjs"

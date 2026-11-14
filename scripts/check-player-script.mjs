@@ -1,7 +1,7 @@
 // The player script is JavaScript generated inside a TS template literal, so tsc can't see
 // syntax errors in it (a single lost backslash in a regex breaks the whole script silently).
 // Parse it the way react-native-webview will run it.
-const { playerScript, accountScript, flushScript, pauseScript, revealScript, tvCommandScript, loginFillScript } = await import('../src/lib/inject.ts');
+const { playerScript, accountScript, flushScript, pauseScript, revealScript, tvCommandScript, loginFillScript, bridgeScript, apiCallScript } = await import('../src/lib/inject.ts');
 
 const script = playerScript({ id: 'episode', t: 42, preload: true });
 const tv = playerScript({ id: 'episode', t: 0, preload: false, tv: true });
@@ -18,6 +18,9 @@ for (const [name, source] of [
   ['revealScript', revealScript(42)],
   ['tvCommandScript', tvCommandScript('seek', -10)],
   ['loginFillScript', login],
+  ['bridgeScript', bridgeScript],
+  ['bridgeScript (as wrapped by the WebView)', `(function() {\n${bridgeScript};\n})();`],
+  ['apiCallScript', apiCallScript('r1', '/api/v1/anime/a"b/episodes?limit=10000')],
 ]) {
   try {
     new Function(source);
@@ -36,7 +39,7 @@ if (/[\u2028\u2029]/.test(login)) {
   process.exit(1);
 }
 // Every page script goes through the gate, which keeps Kitsune off Cloudflare's check page.
-for (const [name, source] of [['playerScript', script], ['playerScript (tv)', tv], ['accountScript', accountScript]]) {
+for (const [name, source] of [['playerScript', script], ['playerScript (tv)', tv], ['accountScript', accountScript], ['bridgeScript', bridgeScript]]) {
   if (!source.includes("type: 'gate'") || !source.includes('gate(function () {')) {
     console.error(`${name} does not go through the gate`);
     process.exit(1);
@@ -44,7 +47,7 @@ for (const [name, source] of [['playerScript', script], ['playerScript (tv)', tv
 }
 // Function declarations hoist, so a second `function tick()` in the same script silently
 // replaces the first. Keep every declared name unique.
-for (const [name, source] of [['playerScript', tv], ['accountScript', accountScript], ['loginFillScript', login]]) {
+for (const [name, source] of [['playerScript', tv], ['accountScript', accountScript], ['loginFillScript', login], ['bridgeScript', bridgeScript]]) {
   const seen = new Set();
   for (const [, fn] of source.matchAll(/function\s+([A-Za-z_$][\w$]*)\s*\(/g)) {
     if (seen.has(fn)) {
@@ -53,5 +56,10 @@ for (const [name, source] of [['playerScript', tv], ['accountScript', accountScr
     }
     seen.add(fn);
   }
+}
+// The bridge script also runs on old TV-box WebViews: keep it to ES5 syntax.
+if (/=>|\blet\s|\bconst\s|`/.test(bridgeScript)) {
+  console.error('bridgeScript uses syntax newer than ES5');
+  process.exit(1);
 }
 console.log('player scripts parse');

@@ -10,7 +10,7 @@ import { Button } from './Button';
 import { Icon } from './Icon';
 import { T } from './T';
 
-/** What the player page reports once a second on a TV (see playerScript's `tv` mode). */
+/** What the player reports a few times a second, for the on-screen controls. */
 export type Tick = { t: number; d: number; paused: boolean; buffering: boolean; audio: string | null; subs: string | null; fill: boolean };
 
 const HIDE_AFTER = 4000;
@@ -19,9 +19,9 @@ const STREAK = 700;
 const SCRUB_EVERY = 220;
 
 /**
- * The TV player's controls, drawn by the app over the site's video: a focus sink that keeps the
- * remote off the web page, the remote's keys, and an OSD (title, progress, time) that shows on
- * any key and fades while playing. Down opens a row: next episode, audio, subtitles, fill.
+ * The TV player's controls, drawn by the app over the video: a focus sink that holds the remote,
+ * the remote's keys, and an OSD (title, progress, time) that shows on any key and fades while
+ * playing. Down opens a row: next episode, audio, subtitles, fill. Up skips an opening or ending.
  */
 export function PlayerOsd({
   title,
@@ -30,10 +30,15 @@ export function PlayerOsd({
   onCommand,
   onJump,
   onExit,
+  skip,
+  onSkip,
 }: {
   title: string;
   episode: string;
-  /** The player hands each 'tick' to this (kept out of React state so the WebView doesn't re-render). */
+  /** Shown while the opening or ending is on: Up skips it. */
+  skip?: string | null;
+  onSkip?: () => void;
+  /** The player hands each tick to this (kept out of React state so the player doesn't re-render). */
   feedRef: { current: ((t: Tick) => void) | null };
   onCommand: (cmd: TvCommand, arg?: number) => void;
   onJump: (step: 1 | -1) => void;
@@ -42,7 +47,7 @@ export function PlayerOsd({
   const [tick, setTick] = useState<Tick | null>(null);
   const [shown, setShown] = useState(true);
   const [menu, setMenu] = useState(false);
-  // Where a seek is headed until the page catches up, so the bar answers the remote at once.
+  // Where a seek is headed until the player catches up, so the bar answers the remote at once.
   const [pending, setPending] = useState<number | null>(null);
   const [nudge, setNudge] = useState<{ text: string; icon: 'rewind' | 'fast-forward' | 'play' | 'pause'; key: number } | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -78,7 +83,7 @@ export function PlayerOsd({
     };
   }, []);
 
-  // A seek the page never confirmed (e.g. before metadata) shouldn't pin the bar forever.
+  // A seek the player never confirmed (e.g. before metadata) shouldn't pin the bar forever.
   useEffect(() => {
     if (pending === null) return;
     const id = setTimeout(() => setPending(null), 2500);
@@ -182,6 +187,7 @@ export function PlayerOsd({
         openMenu();
         break;
       case 'up':
+        if (skip && onSkip) onSkip();
         poke();
         break;
       case 'next':
@@ -230,7 +236,7 @@ export function PlayerOsd({
             {clock(t)}
           </T>
           <T variant="caption" faint>
-            {menu ? 'Up or Back to close' : '◀ ▶ seek   ·   OK pause   ·   ▼ more'}
+            {menu ? 'Up or Back to close' : skip ? `▲ ${skip}   ·   ◀ ▶ seek   ·   ▼ more` : '◀ ▶ seek   ·   OK pause   ·   ▼ more'}
           </T>
           <T variant="caption" dim>
             {d ? `−${clock(d - t)}` : ''}

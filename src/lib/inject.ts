@@ -620,3 +620,44 @@ export function loginFillScript(email: string, password: string) {
 })();
 true;`;
 }
+
+/**
+ * Runs in the app's hidden miruro.cx tab (see components/MiruroBridge.tsx). That tab opens a plain
+ * text file on the site (`/robots.txt`), never a page with the site's scripts, so no ads exist to
+ * guard against. Through the gate, it says it's ready and then answers
+ * `window.__kitsuneApi(id, path)` with same-origin GETs, posting the raw bytes back as base64
+ * (decoding happens in the app). Only `/api/...` and `/env2.js` may be asked for.
+ */
+export const bridgeScript = `(function () {
+  if (window.__kitsuneBridge) return;
+  window.__kitsuneBridge = 1;
+${GATE}
+  gate(function () {
+  function toB64(buf) {
+    var bytes = new Uint8Array(buf || new ArrayBuffer(0)), out = '', i;
+    for (i = 0; i < bytes.length; i += 0x8000) out += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(out);
+  }
+  window.__kitsuneApi = function (id, path) {
+    if (!/^\\/api\\/[A-Za-z0-9_\\-\\/?=&%.,]+$/.test(path) && path !== '/env2.js') return post({ type: 'res', id: id, status: 0, error: 'path' });
+    var x = new XMLHttpRequest();
+    x.open('GET', path, true);
+    x.responseType = 'arraybuffer';
+    x.timeout = 15000;
+    x.onload = function () {
+      var b64 = '';
+      try { b64 = toB64(x.response); } catch (e) {}
+      post({ type: 'res', id: id, status: x.status, ctype: x.getResponseHeader('content-type') || '', b64: b64 });
+    };
+    x.onerror = function () { post({ type: 'res', id: id, status: 0 }); };
+    x.ontimeout = x.onerror;
+    x.send();
+  };
+  post({ type: 'bridge' });
+  });
+})();
+true;`;
+
+/** Asks the bridge tab for one API path; the answer comes back as a 'res' message. */
+export const apiCallScript = (id: string, path: string) =>
+  `window.__kitsuneApi&&window.__kitsuneApi(${JSON.stringify(id)},${JSON.stringify(path)});true;`;

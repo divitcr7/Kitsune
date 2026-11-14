@@ -17,7 +17,6 @@ import type { Episode, Show, Stats } from '@/lib/api';
 import { clock, compact, minutes, year } from '@/lib/format';
 import { art, imgUrl, webUrl } from '@/lib/img';
 import { playEpisode, preloadEpisode, previewOf } from '@/lib/nav';
-import { usePlayer } from '@/lib/player';
 import { q } from '@/lib/queries';
 import { type EpisodeLite, fraction, resumePoint, useStore } from '@/lib/store';
 import { EDGE, isTV, rowFocus, tv } from '@/lib/tv';
@@ -260,16 +259,14 @@ function Body({ show, stats }: { show: Show; stats?: Stats }) {
 }
 
 /**
- * While this page is open, quietly load the up-next episode so Play starts instantly.
- * Keyed on ids, not objects: the show object is replaced when full data lands, and
- * restarting the preload then would throw away the page it already loaded.
+ * While this page is open, quietly look up the up-next episode's streams so Play starts quickly.
+ * Keyed on ids, not objects: the show object is replaced when full data lands.
  */
 function usePreloadUpNext(show: Show, upNext: EpisodeLite | undefined) {
   const latest = useRef({ show, upNext });
   useEffect(() => {
     latest.current = { show, upNext };
   });
-  const showId = show.id;
   const episodeId = upNext?.id;
   useFocusEffect(
     useCallback(() => {
@@ -278,11 +275,8 @@ function usePreloadUpNext(show: Show, upNext: EpisodeLite | undefined) {
         const { show: s, upNext: ep } = latest.current;
         if (ep) preloadEpisode(s, ep);
       }, 2500);
-      return () => {
-        clearTimeout(id);
-        if (!usePlayer.getState().visible) usePlayer.getState().dropPreload(showId);
-      };
-    }, [showId, episodeId]),
+      return () => clearTimeout(id);
+    }, [episodeId]),
   );
 }
 

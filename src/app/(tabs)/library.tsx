@@ -237,7 +237,7 @@ function AccountRow() {
       <View style={{ flex: 1 }}>
         <T variant="heading">anime.nexus account</T>
         <T variant="caption" faint style={{ marginTop: 2 }}>
-          {signedIn ? 'Signed in  ·  manage or sign out' : 'Sign in so streams don’t get interrupted'}
+          {signedIn ? 'Signed in  ·  manage or sign out' : 'Optional: episodes play without it'}
         </T>
       </View>
       <Icon name="chevron-right" tint={color.textFaint} />
@@ -299,7 +299,7 @@ function About() {
         </>
       )}
       <T variant="caption" faint style={{ marginTop: 8, lineHeight: 18 }}>
-        Catalog and streams come from anime.nexus and play in its own player. Kitsune isn’t affiliated with anime.nexus and hosts no content.
+        The catalog comes from anime.nexus and episodes stream from miruro.cx, played in Kitsune’s own player. Kitsune isn’t affiliated with either site and hosts no content.
       </T>
     </View>
   );
