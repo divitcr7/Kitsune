@@ -3,28 +3,35 @@ import type { Show } from '@/lib/catalog';
 import { minutes, timeAgo } from '@/lib/format';
 import { imgUrl } from '@/lib/img';
 import { openShow, playEpisode } from '../nav';
-import { fraction, type HistoryEntry, store, useStore } from '../store';
+import { byRecent, fraction, type HistoryEntry, orderOf, store, useStore } from '../store';
 import { Btn, ContinueCard, Fox, Grid, Icon, Img, Rail } from './kit';
+import { useShowing } from './showing';
 
 declare const KITSUNE_VERSION: string;
 
 export function Library() {
-  const history = useStore((s) => s.history);
-  const progress = useStore((s) => s.progress);
-  const myList = useStore((s) => s.myList);
-  const entries = useMemo(() => Object.values(history).sort((a, b) => b.at - a.at), [history]);
-  const inProgress = useMemo(() => entries.filter((e) => fraction(progress[e.episode.id]) < 0.92).slice(0, 10), [entries, progress]);
-
-  const stats = useMemo(() => {
+  // Redrawn each time it comes back into view, so "time ago" is current.
+  useShowing();
+  // Selected as strings, so progress saved during playback redraws this screen only when what it shows changes.
+  const order = useStore((s) => orderOf(byRecent(s.history)));
+  const unfinished = useStore((s) => orderOf(byRecent(s.history).filter((e) => fraction(s.progress[e.episode.id]) < 0.92).slice(0, 10)));
+  const totals = useStore((s) => {
     let done = 0;
     let seconds = 0;
-    for (const p of Object.values(progress)) {
+    for (const p of Object.values(s.progress)) {
       if (p.d && p.t / p.d > 0.85) done++;
       seconds += Math.min(p.t, p.d || p.t);
     }
     const hours = seconds / 3600;
-    return { shows: entries.length, done, hours: hours < 10 ? hours.toFixed(1) : String(Math.round(hours)) };
-  }, [progress, entries.length]);
+    return [Object.keys(s.history).length, done, hours < 10 ? hours.toFixed(1) : Math.round(hours)].join(' ');
+  });
+  const myList = useStore((s) => s.myList);
+  const entries = useMemo(() => (order ? byRecent(store.get().history) : []), [order]);
+  const inProgress = useMemo(
+    () => (unfinished ? entries.filter((e) => fraction(store.get().progress[e.episode.id]) < 0.92).slice(0, 10) : []),
+    [entries, unfinished],
+  );
+  const [shows, done, hours] = totals.split(' ');
 
   return (
     <div className="k-screen">
@@ -32,9 +39,9 @@ export function Library() {
         <div className="k-head" data-row="">
           <div className="t-display">My Stuff</div>
           <div className="k-stats">
-            <Stat value={String(stats.shows)} label="Shows" />
-            <Stat value={String(stats.done)} label="Episodes" />
-            <Stat value={stats.hours} label="Hours" />
+            <Stat value={shows} label="Shows" />
+            <Stat value={done} label="Episodes" />
+            <Stat value={hours} label="Hours" />
           </div>
         </div>
 

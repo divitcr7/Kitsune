@@ -207,6 +207,13 @@ aside for it). Its output must be ES5 (`npm run build:tizen` fails otherwise; ru
 `trimStart` go in `polyfills.ts`) and its CSS avoids flex `gap`, grid and custom properties. Test it
 by running `dist/kitsune.js` in a desktop Chrome tab on that robots.txt page.
 
+Samsung TVs are slow, so the module stays light: screens stay mounted (`ui/App.tsx`: each tab once
+opened, and the back stack) and are hidden with `visibility`, so Back and the player's close are a
+repaint, not a rebuild. Focus only goes inside the `data-layer` on top (the player is always one) or
+the `data-zone`s (the screen on show and the nav). A screen learns it's on show through
+`ui/showing.ts`, not props, and `useStore` selectors should return values that stay equal while
+nothing visible changes. No blurred shadows, endless animations or full-size (4K) art.
+
 ## Commands
 
 ```sh

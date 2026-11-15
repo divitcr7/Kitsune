@@ -1,6 +1,6 @@
 {
   "name": "@divit7/kitsune-tizen",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "appName": "Kitsune",
   "description": "Kitsune for Samsung TVs: miruro.cx with a cinematic 10-foot UI, its own player and no ads, as a TizenBrew module.",
   "packageType": "mods",
@@ -33,5 +33,5 @@
     "url": "git+https://github.com/divitcr7/Kitsune.git",
     "directory": "tv/tizen"
   },
-  "kitsuneNotes": "Now on miruro.cx: its catalog, and episodes in Kitsune’s own player with quality, audio language, subtitles and skip intro."
+  "kitsuneNotes": "Smoother and lighter: Back and leaving an episode return to exactly where you were, and search keeps its size while you type."
 }

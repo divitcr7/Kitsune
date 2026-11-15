@@ -435,7 +435,8 @@ export function Player({ playing }: { playing: Playing }) {
   const quality = prefs.quality && tracks.heights.length ? `${Math.min(prefs.quality, tracks.heights[0])}p` : 'Auto';
 
   return (
-    <div id="kitsune-player" data-layer={controls || problem ? '' : undefined}>
+    // Always a layer, so the remote never reaches the screens kept under the player.
+    <div id="kitsune-player" data-layer="">
       <video ref={video} className="p-video" style={{ objectFit: prefs.fill ? 'cover' : 'contain' }} playsInline />
 
       {ready && !problem ? (

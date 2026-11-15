@@ -1,8 +1,9 @@
 /* eslint-disable react-hooks/immutability -- false positives: the React Compiler lint does not recognise preact/hooks' useRef, so it treats ref writes (even inside effects) as mutating a frozen hook value. */
-import { useEffect, useRef, useState } from 'preact/hooks';
-import { activate, focus, focusInitial, focused, move, refocus } from '../focus';
-import { exitApp, isTyping, onKeys } from '../keys';
-import { format, player, type Route, router, TABS } from '../nav';
+import { Component } from 'preact';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { activate, focus, focusInitial, focused, move, refocus, usable } from '../focus';
+import { exitApp, isTyping, onKeys, paced } from '../keys';
+import { format, isTab, player, type Route, router, type Tab, TABS } from '../nav';
 import { Player, playerKey } from '../player';
 import { loadHls } from '../engine';
 import { Library } from './Library';
@@ -10,6 +11,7 @@ import { GenreScreen, Schedule, Search } from './Browse';
 import { Home } from './Home';
 import { ShowScreen } from './Show';
 import { Btn, Fox } from './kit';
+import { Shown, ShownContext } from './showing';
 
 declare const KITSUNE_VERSION: string;
 declare const KITSUNE_NOTES: string;
@@ -31,17 +33,58 @@ function usePlaying() {
   return playing;
 }
 
-function useRoute() {
-  const [route, setRoute] = useState(router.top());
-  useEffect(() => router.subscribe(() => setRoute(router.top())), []);
-  return route;
+type Screens = { stack: readonly Route[]; tabs: Tab[] };
+
+/**
+ * Screens stay mounted: every screen in the back stack, and each tab once it's been opened. Back and
+ * switching tabs show them exactly as they were left (scroll, focus, loaded rows) instead of
+ * building them again.
+ */
+function useScreens(): Screens {
+  const read = (tabs: Tab[]): Screens => {
+    const stack = router.stack();
+    const first = stack[0];
+    const opened = stack.length === 1 && isTab(first) && tabs.indexOf(first.name) < 0 ? first.name : null;
+    return { stack, tabs: opened ? tabs.concat(opened) : tabs };
+  };
+  const [screens, setScreens] = useState(() => read([]));
+  useEffect(() => router.subscribe(() => setScreens((s) => read(s.tabs))), []);
+  return screens;
 }
+
+/** A mounted screen redraws from its own state; App's re-renders (a screen opening over it, the nav hiding) pass it by. */
+class Frozen extends Component<{ route: Route }> {
+  shouldComponentUpdate() {
+    return false;
+  }
+  render() {
+    return <Screen route={this.props.route} />;
+  }
+}
+
+/** One mounted screen. Out of view it keeps its layout (visibility, not display), so coming back is a repaint, not a rebuild. */
+function Slot({ route, top, showing }: { route: Route; top: boolean; showing: boolean }) {
+  const [shown] = useState(() => new Shown(showing));
+  useEffect(() => shown.set(showing), [shown, showing]);
+  return (
+    <div className={`k-slot${top ? '' : ' k-off'}`} data-zone={top ? '' : undefined}>
+      <ShownContext.Provider value={shown}>
+        <Frozen route={route} />
+      </ShownContext.Provider>
+    </div>
+  );
+}
+
+/** The screen on show, and the page in it that scrolls. */
+const activeSlot = (host: HTMLElement) => host.querySelector('.k-slot[data-zone]') as HTMLElement | null;
+const activePage = (host: HTMLElement) => host.querySelector('.k-slot[data-zone] [data-page]') as HTMLElement | null;
 
 /** Remembers which card each screen had focused, so Back lands where you were. */
 const lastFocus: Record<string, string> = {};
 
 export function App() {
-  const route = useRoute();
+  const { stack, tabs } = useScreens();
+  const route = stack[stack.length - 1];
   const playing = usePlaying();
   const key = format(route);
   const [leaving, setLeaving] = useState(false);
@@ -64,7 +107,7 @@ export function App() {
   // Keys: arrows move focus, OK activates, Back walks the stack (and asks before leaving the app).
   useEffect(
     () =>
-      onKeys((action) => {
+      onKeys((action, e) => {
         if (player.get()) return playerKey(action);
         pressed.current = true;
         if (isTyping()) {
@@ -80,7 +123,7 @@ export function App() {
           return false;
         }
         if (action === 'left' || action === 'right' || action === 'up' || action === 'down') {
-          move(action);
+          if (paced(e)) move(action);
           return true;
         }
         if (action === 'ok') {
@@ -112,17 +155,18 @@ export function App() {
       }),
     [],
   );
-  useEffect(() => setNavHidden(false), [key]);
-
   // Screens fill in as data arrives; keep focus valid and land it on the right element when it shows up.
-  useEffect(() => {
-    const el = root.current;
-    if (!el) return;
+  // A layout effect, so a screen coming back is never drawn without its focus.
+  useLayoutEffect(() => {
+    const host = root.current;
+    if (!host) return;
     let queued = 0;
     const settle = () => {
       queued = 0;
-      // A screen that's on its way out doesn't get a say.
-      if (format(router.top()) !== key) return;
+      // A screen on its way out, or under the player, doesn't get a say.
+      if (player.get() || format(router.top()) !== key) return;
+      const el = activeSlot(host);
+      if (!el) return;
       const fresh = !pressed.current;
       const want = lastFocus[key];
       if (fresh && want) {
@@ -136,13 +180,16 @@ export function App() {
       const auto = el.querySelector('[data-autofocus]') as HTMLElement | null;
       // Until a key is pressed, a preferred target that just appeared beats wherever focus fell back to.
       if (fresh && auto && cur !== auto && !want) return focus(auto);
-      if (!cur || !el.contains(cur)) refocus();
+      if (!usable(cur)) refocus();
     };
     const observer = new MutationObserver(() => {
       if (!queued) queued = window.setTimeout(settle, 0);
     });
-    observer.observe(el, { childList: true, subtree: true });
+    observer.observe(host, { childList: true, subtree: true });
     settle();
+    // A screen kept from before may be scrolled down, where the nav stays tucked away.
+    const cur = focused();
+    setNavHidden(!(cur && cur.closest('.k-nav')) && Number(activePage(host)?.getAttribute('data-y')) > 0);
     return () => {
       observer.disconnect();
       if (queued) clearTimeout(queued);
@@ -162,14 +209,44 @@ export function App() {
     loadHls();
   }, []);
 
-  // Back from the player: focus returns to the screen as it was.
+  // Back from the player: focus returns to the card it started from, on the screen as it was.
   const wasPlaying = useRef(!!playing);
-  useEffect(() => {
-    if (wasPlaying.current && !playing) setTimeout(() => refocus(), 0);
+  const beforePlay = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (playing && !wasPlaying.current) beforePlay.current = focused();
+    if (!playing && wasPlaying.current) {
+      const back = beforePlay.current;
+      beforePlay.current = null;
+      if (back && usable(back)) focus(back);
+      else refocus();
+    }
     wasPlaying.current = !!playing;
   }, [playing]);
 
-  const tab = route.name === 'home' || route.name === 'search' || route.name === 'schedule' || route.name === 'library';
+  // While the TV's keyboard is up, the nav steps aside and the search page lifts above the keyboard.
+  useEffect(() => {
+    const host = root.current;
+    if (!host) return;
+    const field = (e: Event) => {
+      const t = e.target as HTMLElement | null;
+      return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA');
+    };
+    const onIn = (e: Event) => field(e) && host.classList.add('k-typing');
+    const onOut = (e: Event) => field(e) && host.classList.remove('k-typing');
+    host.addEventListener('focusin', onIn);
+    host.addEventListener('focusout', onOut);
+    return () => {
+      host.removeEventListener('focusin', onIn);
+      host.removeEventListener('focusout', onOut);
+    };
+  }, []);
+
+  const tab = stack.length === 1 && isTab(route);
+  const onTab = tab ? route.name : null;
+  const slots: { key: string; route: Route; on: boolean }[] = tabs.map((t) => ({ key: `tab:${t}`, route: { name: t }, on: t === onTab }));
+  stack.forEach((r, i) => {
+    if (i > 0 || !isTab(r)) slots.push({ key: `${i}:${format(r)}`, route: r, on: i === stack.length - 1 });
+  });
 
   // The nav tucks away while the page is scrolled down; focusing it brings the page back to the top.
   useEffect(() => {
@@ -178,10 +255,10 @@ export function App() {
     const onFocus = (e: Event) => {
       const target = e.target as HTMLElement;
       // Remember where the user put focus on each screen, so Back lands on the same card. (Focus
-      // placed automatically on arrival isn't a choice, so it isn't remembered.)
+      // placed automatically on arrival isn't a choice, and the nav isn't part of the screen.)
       const k = target.getAttribute('data-k');
-      if (k && pressed.current && !target.closest('[data-layer]')) lastFocus[format(router.top())] = k;
-      const page = host.querySelector('[data-page]') as HTMLElement | null;
+      if (k && pressed.current && !target.closest('[data-layer]') && !target.closest('.k-nav')) lastFocus[format(router.top())] = k;
+      const page = activePage(host);
       if (target.closest('.k-nav')) {
         if (page) {
           page.style.transform = 'translate3d(0,0,0)';
@@ -196,8 +273,10 @@ export function App() {
 
   return (
     <div ref={root} style={{ position: 'absolute', left: 0, top: 0, width: 1920, height: 1080 }}>
-      <div style={{ display: playing ? 'none' : 'block' }}>
-        <Screen key={key} route={route} />
+      <div className={`k-screens${playing ? ' k-off' : ''}`}>
+        {slots.map((s) => (
+          <Slot key={s.key} route={s.route} top={s.on} showing={s.on && !playing} />
+        ))}
         {tab ? <Nav active={route.name} hidden={navHidden} /> : null}
       </div>
       {playing ? <Player key={playing.episode.id} playing={playing} /> : null}
@@ -249,7 +328,7 @@ function Screen({ route }: { route: Route }) {
 function Nav({ active, hidden }: { active: string; hidden: boolean }) {
   const off = hidden ? { 'data-f-off': '' } : {};
   return (
-    <div className={`k-nav${hidden ? ' hidden' : ''}`} data-g="nav">
+    <div className={`k-nav${hidden ? ' hidden' : ''}`} data-g="nav" data-zone="">
       <div className="k-brand">
         <Fox size={50} />
         <span className="k-word">kitsune</span>

@@ -68,7 +68,14 @@ export function Spinner() {
   return <div className="k-spin" />;
 }
 
-/** A titled shelf that scrolls sideways as focus moves along it. */
+/** Cards a rail starts with, and adds each time focus gets within LOOKAHEAD of the last one. */
+const STEP = 12;
+const LOOKAHEAD = 8;
+
+/**
+ * A titled shelf that scrolls sideways as focus moves along it. Cards are added a screenful ahead of
+ * focus, so Home doesn't build and load every card of every rail up front.
+ */
 export function Rail<T>({
   id,
   title,
@@ -88,14 +95,24 @@ export function Rail<T>({
   width: number;
   first?: boolean;
 }) {
+  const [count, setCount] = useState(STEP);
   if (items && !items.length) return null;
   return (
     <section className={`k-rail${first ? ' first' : ''}`} data-row="" data-g={id}>
       <div className="k-rail-head t-title">{title}</div>
       <div className="k-rail-view">
-        <div className="k-track" data-track="">
+        <div
+          className="k-track"
+          data-track=""
+          {...on('kfocus', (e) => {
+            if (!items || count >= items.length) return;
+            let after = 0;
+            for (let n = (e.target as Element).nextElementSibling; n; n = n.nextElementSibling) after++;
+            if (after < LOOKAHEAD) setCount((c) => c + STEP);
+          })}
+        >
           {items
-            ? items.map((it, i) => render(it, i, `${id}:${keyOf(it)}`))
+            ? items.slice(0, count).map((it, i) => render(it, i, `${id}:${keyOf(it)}`))
             : [0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="k-skel" style={{ width, height }} />)}
         </div>
       </div>

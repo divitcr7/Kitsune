@@ -5,7 +5,8 @@
  * - Arrows pick the nearest candidate in that direction by geometry.
  * - A `data-g` container remembers where focus last was, so coming back into a rail lands on the
  *   same card instead of the nearest one.
- * - While a `data-layer` (a modal, the player's control row) is open, focus stays inside the last one.
+ * - While a `data-layer` (a modal, the player) is open, focus stays inside the last one. Otherwise it
+ *   stays inside the `data-zone`s: the screen on show and the nav, not the screens kept behind them.
  * - Focusing scrolls the closest `data-track` sideways and the closest `data-page` up or down with
  *   transforms (cheap on TV GPUs, no smooth-scroll API needed on old Chromium).
  * - Moving off an edge dispatches a bubbling `kedge` event ({ detail: dir }) so a hero can page.
@@ -15,17 +16,49 @@ export type Dir = 'left' | 'right' | 'up' | 'down';
 let current: HTMLElement | null = null;
 const memory: Record<string, string> = {};
 
+// A re-render that sets an element's className (a tab turning "on", a day being picked) drops the
+// focus class; put it back before the frame is drawn.
+const keepRing = new MutationObserver(() => {
+  if (current && !current.classList.contains('f')) current.classList.add('f');
+});
+
 function shown(el: HTMLElement) {
   return el.offsetWidth > 0 && el.offsetHeight > 0 && !el.hasAttribute('data-f-off');
 }
 
-function scope(): ParentNode {
+/** Where focus can go: the top layer if one is open, else the zones (or the whole page, if none). */
+function zones(): Element[] {
   const layers = document.querySelectorAll('[data-layer]');
-  return layers.length ? layers[layers.length - 1] : document;
+  if (layers.length) return [layers[layers.length - 1]];
+  const marked = document.querySelectorAll('[data-zone]');
+  return marked.length ? Array.prototype.slice.call(marked) : [document.documentElement];
+}
+
+function inZone(el: Element) {
+  for (const z of zones()) if (z.contains(el)) return true;
+  return false;
+}
+
+function find(selector: string): HTMLElement | null {
+  for (const z of zones()) {
+    const el = z.querySelector(selector) as HTMLElement | null;
+    if (el) return el;
+  }
+  return null;
 }
 
 export function focusables(): HTMLElement[] {
-  return Array.prototype.filter.call(scope().querySelectorAll('[data-f]'), shown) as HTMLElement[];
+  const out: HTMLElement[] = [];
+  for (const z of zones()) {
+    const list = z.querySelectorAll('[data-f]');
+    for (let i = 0; i < list.length; i++) if (shown(list[i] as HTMLElement)) out.push(list[i] as HTMLElement);
+  }
+  return out;
+}
+
+/** Can focus stay on `el` (still on the page, in a zone, visible)? */
+export function usable(el: HTMLElement | null): boolean {
+  return !!el && document.documentElement.contains(el) && inZone(el) && shown(el);
 }
 
 export function focused() {
@@ -43,6 +76,8 @@ export function focus(el: HTMLElement | null | undefined) {
   if (prev) prev.classList.remove('f');
   current = el;
   el.classList.add('f');
+  keepRing.disconnect();
+  keepRing.observe(el, { attributes: true, attributeFilter: ['class'] });
   const g = groupOf(el);
   const k = el.getAttribute('data-k');
   if (g && k) memory[g.getAttribute('data-g') as string] = k;
@@ -52,18 +87,17 @@ export function focus(el: HTMLElement | null | undefined) {
   el.dispatchEvent(new CustomEvent('kfocus', { bubbles: true }));
 }
 
-/** Focus the screen's preferred element (`data-autofocus`), else the remembered one, else the first. */
-export function focusInitial(root: ParentNode = scope()) {
-  const list = focusables();
-  const auto = root.querySelector('[data-autofocus]') as HTMLElement | null;
-  focus((auto && shown(auto) && auto) || list[0]);
+/** Focus the preferred element (`data-autofocus`), else the first. */
+export function focusInitial() {
+  const auto = find('[data-autofocus]');
+  focus((auto && shown(auto) && auto) || focusables()[0]);
 }
 
 /** After a re-render: keep focus on the same item if it still exists, otherwise find a sensible one. */
 export function refocus() {
-  if (focused() && scope().contains(current)) return reveal(current as HTMLElement);
+  if (current && usable(current)) return reveal(current);
   const k = current?.getAttribute('data-k');
-  const same = k ? (scope().querySelector(`[data-k="${k.replace(/"/g, '\\"')}"]`) as HTMLElement | null) : null;
+  const same = k ? find(`[data-k="${k.replace(/"/g, '\\"')}"]`) : null;
   if (same && shown(same)) focus(same);
   else focusInitial();
 }
@@ -95,11 +129,11 @@ function score(dir: Dir, a: DOMRect, b: DOMRect) {
 /** Moves focus; returns false when there's nothing that way (an edge). */
 export function move(dir: Dir): boolean {
   const from = focused();
-  const list = focusables();
-  if (!from || !scope().contains(from)) {
+  if (!from || !inZone(from)) {
     focusInitial();
     return true;
   }
+  const list = focusables();
   const a = from.getBoundingClientRect();
   let best: HTMLElement | null = null;
   let bestScore = Infinity;

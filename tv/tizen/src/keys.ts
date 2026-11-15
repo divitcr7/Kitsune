@@ -56,6 +56,32 @@ export function isTyping() {
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');
 }
 
+let lastKey = 0;
+
+/** Milliseconds since the last remote key. */
+export function sinceKey() {
+  return Date.now() - lastKey;
+}
+
+let drawing = false;
+let lastMove = 0;
+
+/**
+ * A held arrow repeats faster than an older TV can draw. Moves that arrive before the last one has
+ * reached the screen are dropped, so focus stops when the key is let go instead of running on through
+ * a backlog. A quick second press still counts.
+ */
+export function paced(e: KeyboardEvent): boolean {
+  const now = Date.now();
+  if (drawing && (e.repeat || now - lastMove < 150)) return false;
+  drawing = true;
+  lastMove = now;
+  requestAnimationFrame(() => {
+    drawing = false;
+  });
+  return true;
+}
+
 /**
  * Listens before the page does (capture on window). Returning true from the handler swallows the key
  * so the site's own shortcuts (video.js hotkeys, page scroll) never see it.
@@ -64,6 +90,7 @@ export function onKeys(handler: (action: Action, e: KeyboardEvent) => boolean | 
   const listener = (e: KeyboardEvent) => {
     const action = actionOf(e);
     if (!action) return;
+    lastKey = Date.now();
     if (handler(action, e)) {
       e.preventDefault();
       e.stopPropagation();

@@ -1,13 +1,17 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Show } from '@/lib/catalog';
 import { year } from '@/lib/format';
 import { imgUrl } from '@/lib/img';
 import { api, rails, useData } from '../api';
-import { openShow, playShow } from '../nav';
-import { store, useStore } from '../store';
+import { sinceKey } from '../keys';
+import { ART, openShow, playShow } from '../nav';
+import { byRecent, orderOf, store, useStore } from '../store';
 import { Btn, ContinueCard, EpisodeCard, Img, on, PosterCard, Rail, RankCard } from './kit';
+import { useShowing } from './showing';
 
 const DWELL = 9000;
+/** The hero holds its slide while the remote is in use, so a crossfade never competes with moving focus. */
+const QUIET = 3000;
 
 export function Home() {
   const featured = useData('featured', api.featured, rails);
@@ -16,8 +20,8 @@ export function Home() {
   const seasonal = useData('seasonal', api.seasonal, rails);
   const trending = useData('trending', () => api.discover('trending', 1).then((r) => r.data), rails);
   const recent = useData('recent', api.recent, rails);
-  const history = useStore((s) => s.history);
-  const continueWatching = useMemo(() => Object.values(history).sort((a, b) => b.at - a.at).slice(0, 12), [history]);
+  const order = useStore((s) => orderOf(byRecent(s.history).slice(0, 12)));
+  const continueWatching = useMemo(() => (order ? byRecent(store.get().history).slice(0, 12) : []), [order]);
 
   return (
     <div className="k-screen">
@@ -94,13 +98,15 @@ export function Home() {
 }
 
 /**
- * Full-bleed key art with a slow push, title art and actions over a deep fade. It moves on by itself;
- * Left from Play or Right from My List steps through it by hand.
+ * Full-bleed key art, title art and actions over a deep fade. It moves on by itself; Left from Play
+ * or Right from My List steps through it by hand.
  */
 function Hero({ items }: { items: Show[] | undefined }) {
   const [index, setIndex] = useState(0);
   const [prev, setPrev] = useState<number | null>(null);
   const count = items?.length ?? 0;
+  const showing = useShowing();
+  const self = useRef<HTMLElement>(null);
 
   const go = (step: number) => {
     if (!count) return;
@@ -108,17 +114,27 @@ function Hero({ items }: { items: Show[] | undefined }) {
     setIndex((index + step + count) % count);
   };
 
+  // Moves on by itself only while Home is on show, the remote is idle and the page is at the top.
   useEffect(() => {
-    if (count < 2) return;
-    const id = setTimeout(() => go(1), DWELL);
+    if (count < 2 || !showing) return;
+    let id = 0;
+    const wait = (ms: number) => {
+      id = window.setTimeout(() => {
+        const page = self.current && self.current.closest('[data-page]');
+        if (Number(page?.getAttribute('data-y')) > 0 || sinceKey() < QUIET) wait(QUIET);
+        else go(1);
+      }, ms);
+    };
+    wait(DWELL);
     return () => clearTimeout(id);
-  }, [index, count]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [index, count, showing]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!items || !count) return <section className="k-hero" data-row="" />;
+  if (!items || !count) return <section ref={self} className="k-hero" data-row="" />;
   const show = items[Math.min(index, count - 1)];
 
   return (
     <section
+      ref={self}
       className="k-hero"
       data-row=""
       {...on('kedge', (e) => {
@@ -157,7 +173,7 @@ function Art({ show, active }: { show: Show; active: boolean }) {
   }, [active]);
   return (
     <div className={`k-hero-art${on ? ' on' : ''}`}>
-      <Img src={imgUrl(show.background ?? show.backdrop, 'background', '1920x1080') ?? imgUrl(show.poster, 'poster', '1560x2340')} />
+      <Img src={imgUrl(show.background ?? show.backdrop, 'background', ART) ?? imgUrl(show.poster, 'poster', '1560x2340')} />
     </div>
   );
 }

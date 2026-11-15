@@ -3,7 +3,7 @@ import type { Episode, Show, Stats } from '@/lib/catalog';
 import { clock, compact, minutes, year } from '@/lib/format';
 import { imgUrl } from '@/lib/img';
 import { api, useData } from '../api';
-import { playEpisode, previewOf } from '../nav';
+import { ART, playEpisode, previewOf } from '../nav';
 import { type EpisodeLite, fraction, resumePoint, store, useStore } from '../store';
 import { Btn, Icon, Img, on, ProgressBar, Spinner } from './kit';
 
@@ -38,7 +38,7 @@ export function ShowScreen({ id }: { id: string }) {
 }
 
 function Backdrop({ show }: { show?: Show }) {
-  const src = imgUrl(show?.background ?? show?.backdrop, 'background', '1920x1080') ?? imgUrl(show?.poster, 'poster', '1560x2340');
+  const src = imgUrl(show?.background ?? show?.backdrop, 'background', ART) ?? imgUrl(show?.poster, 'poster', '1560x2340');
   return (
     <div className="k-backdrop">
       <Img src={src} />
@@ -53,8 +53,9 @@ function Body({ show, stats }: { show: Show; stats?: Stats }) {
   const [page, setPage] = useState(1);
   const [shown, setShown] = useState(BATCH);
   const episodes = useData(`episodes:${show.id}:${page}:${order}`, () => api.episodes(show.id, page, order), { stale: 2 * 60_000 });
-  const entry = useStore((s) => s.history[show.id]);
-  const lastProgress = useStore((s) => (entry ? s.progress[entry.episode.id] : undefined));
+  // The episode, not the history entry: the entry's time changes with every progress save.
+  const last = useStore((s) => s.history[show.id]?.episode);
+  const lastProgress = useStore((s) => (last ? s.progress[last.id] : undefined));
   const inList = useStore((s) => s.myList.some((m) => m.id === show.id));
 
   const total = episodes.data?.meta.total ?? 0;
@@ -62,13 +63,13 @@ function Body({ show, stats }: { show: Show; stats?: Stats }) {
   const list = episodes.data?.data;
 
   const upNext: EpisodeLite | undefined = useMemo(() => {
-    if (entry) {
-      if (lastProgress && fraction(lastProgress) > 0.92) return list?.find((e) => e.number === entry.episode.number + 1) ?? entry.episode;
-      return entry.episode;
+    if (last) {
+      if (lastProgress && fraction(lastProgress) > 0.92) return list?.find((e) => e.number === last.number + 1) ?? last;
+      return last;
     }
     return order === 'asc' && page === 1 ? list?.[0] : undefined;
-  }, [entry, lastProgress, list, order, page]);
-  const resumeAt = upNext && entry && upNext.id === entry.episode.id ? resumePoint(lastProgress) : 0;
+  }, [last, lastProgress, list, order, page]);
+  const resumeAt = upNext && last && upNext.id === last.id ? resumePoint(lastProgress) : 0;
 
   const score = stats?.average?.score ?? show.average?.score;
   const eps = show.episode_count_current ?? show.episode_count;

@@ -65,54 +65,33 @@ function usePages(key: string, enabled: boolean, fetchPage: (page: number, prev?
   const more = () => {
     if (!done && !loading) setState((s) => (s.key === key ? { ...s, want: Math.max(s.want, s.pages.length + 1) } : { key, pages: [], want: 1 }));
   };
-  return { shows, total: pages[0]?.meta.total, loading, error, more };
+  // Cursor-paged lists (search, genres) don't know their total and report 0.
+  return { shows, total: pages[0]?.meta.total || undefined, loading, error, more };
 }
 
 export function Search() {
-  const [text, setText] = useState('');
   const [query, setQuery] = useState('');
-  const input = useRef<HTMLInputElement>(null);
   const genres = useData('genres', api.genres, { persist: true, stale: 24 * 60 * 60_000 });
-
-  useEffect(() => {
-    const id = setTimeout(() => setQuery(text.trim()), 350);
-    return () => clearTimeout(id);
-  }, [text]);
 
   const searching = query.length > 1;
   const results = usePages(`search:${query}`, searching, (_page, prev) => api.shows({ search: query, cursor: prev?.next }));
   const popular = usePages('popular-week', !searching, (page) => api.discover('popular', page));
-  const source = searching ? results : popular;
   const main = useMemo(() => genres.data?.filter((g) => g.type === 'genre'), [genres.data]);
+
+  // The last results stay up while the next query loads, so typing doesn't flash the grid empty.
+  const [last, setLast] = useState<{ query: string; shows: Show[] } | null>(null);
+  useEffect(() => {
+    if (searching && results.shows) setLast({ query, shows: results.shows });
+  }, [searching, query, results.shows]);
+  const found = !searching ? null : results.shows ? { query, shows: results.shows } : results.error ? null : last;
+  const source = searching ? results : popular;
 
   return (
     <div className="k-screen">
-      <div className="k-page" data-page="150">
+      <div className="k-page k-lift" data-page="150">
         <div className="k-head" data-row="">
           <div className="t-display">Search</div>
-          <div
-            className="k-search"
-            data-f=""
-            data-k="search:field"
-            data-autofocus=""
-            onClick={() => input.current?.focus()}
-          >
-            <Icon name="magnify" size={34} />
-            <input
-              ref={input}
-              value={text}
-              placeholder="Shows, movies, Japanese titles"
-              autoComplete="off"
-              autoCorrect="off"
-              {...plainText}
-              onInput={(e) => setText((e.target as HTMLInputElement).value)}
-              onBlur={() => {
-                // Back on the remote's focus ring once the keyboard closes.
-                const wrap = input.current?.parentElement as HTMLElement | null;
-                if (wrap && focused() !== wrap) focus(wrap);
-              }}
-            />
-          </div>
+          <SearchField onQuery={setQuery} />
         </div>
 
         {!searching && main?.length ? (
@@ -138,24 +117,55 @@ export function Search() {
           />
         ) : null}
 
-        <div className="k-rail-head t-title" style={{ marginTop: 46 }} data-row="">
-          {searching ? (results.shows ? `${results.total ?? results.shows.length} Results` : 'Searching…') : 'Popular This Week'}
+        <div className="k-rail-head t-title k-one" style={{ marginTop: 46 }} data-row="">
+          {!searching ? 'Popular This Week' : found ? `Results for “${found.query}”` : 'Searching…'}
         </div>
-        {searching && results.shows && !results.shows.length ? (
-          <div className="k-empty">
-            Nothing for “{query}”. Try the English or Japanese title.
-          </div>
+        {found && !found.shows.length ? (
+          <div className="k-empty">Nothing for “{found.query}”. Try the English or Japanese title.</div>
+        ) : searching ? (
+          <Grid id="results" shows={found?.shows} loading={!found && results.loading} onNearEnd={results.more} />
         ) : (
-          <Grid id={searching ? 'results' : 'popular'} shows={source.shows} loading={source.loading} onNearEnd={source.more} />
+          <Grid id="popular" shows={popular.shows} loading={popular.loading} onNearEnd={popular.more} />
         )}
         {source.loading && source.shows ? (
           <div style={{ padding: '10px 0 40px 930px' }}>
             <Spinner />
           </div>
         ) : null}
-        {source.error && !source.shows ? <div className="k-empty">Couldn’t reach miruro.cx. Try again in a moment.</div> : null}
+        {source.error && !source.shows && !found ? <div className="k-empty">Couldn’t reach miruro.cx. Try again in a moment.</div> : null}
         <div style={{ height: 120 }} />
       </div>
+    </div>
+  );
+}
+
+/** The field keeps what's typed to itself, so the screen redraws once per search rather than per letter. */
+function SearchField({ onQuery }: { onQuery: (q: string) => void }) {
+  const [text, setText] = useState('');
+  const input = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const id = setTimeout(() => onQuery(text.trim()), 350);
+    return () => clearTimeout(id);
+  }, [text, onQuery]);
+
+  return (
+    <div className="k-search" data-f="" data-k="search:field" data-autofocus="" onClick={() => input.current?.focus()}>
+      <Icon name="magnify" size={34} />
+      <input
+        ref={input}
+        value={text}
+        placeholder="Shows, movies, Japanese titles"
+        autoComplete="off"
+        autoCorrect="off"
+        {...plainText}
+        onInput={(e) => setText((e.target as HTMLInputElement).value)}
+        onBlur={() => {
+          // Back on the remote's focus ring once the keyboard closes.
+          const wrap = input.current?.parentElement as HTMLElement | null;
+          if (wrap && focused() !== wrap) focus(wrap);
+        }}
+      />
     </div>
   );
 }

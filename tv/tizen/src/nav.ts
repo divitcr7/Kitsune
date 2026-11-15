@@ -23,6 +23,10 @@ export const TABS: { name: Tab; label: string }[] = [
   { name: 'library', label: 'My Stuff' },
 ];
 
+export function isTab(r: Route): r is { name: Tab } {
+  return r.name === 'home' || r.name === 'search' || r.name === 'schedule' || r.name === 'library';
+}
+
 export function format(r: Route): string {
   if (r.name === 'show') return `/show/${encodeURIComponent(r.id)}`;
   if (r.name === 'genre') return `/genre/${encodeURIComponent(r.id)}/${encodeURIComponent(r.title)}`;
@@ -64,6 +68,7 @@ function commit(next: Route[]) {
 export const router = {
   top: () => stack[stack.length - 1],
   depth: () => stack.length,
+  stack: (): readonly Route[] => stack,
   subscribe(fn: () => void) {
     subs.add(fn);
     return () => {
@@ -89,6 +94,12 @@ export const router = {
     commit([{ name }]);
   },
 };
+
+/**
+ * Full-screen art (hero, show backdrop, player loader) at 1280 wide: it sits under dark fades, and
+ * TMDB's originals run to 4K, which a TV decodes slowly and holds 33 MB of memory for.
+ */
+export const ART = '1360x768';
 
 const previews = new Map<string, Show>();
 
@@ -135,7 +146,7 @@ export function playEpisode(show: Show | ShowLite, episode: EpisodeLite) {
   player.open({
     show: s,
     episode,
-    thumb: imgUrl(episode.image, 'episode', '1280x720') ?? imgUrl(show.background ?? show.poster, 'background', '1920x1080'),
+    thumb: imgUrl(episode.image, 'episode', '1280x720') ?? imgUrl(show.background ?? show.poster, 'background', ART),
   });
 }
 

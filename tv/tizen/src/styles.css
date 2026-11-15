@@ -3,14 +3,17 @@
  * Laid out on a 1920x1080 canvas (scaled to the screen) with ~5% overscan margins.
  * Chromium 47 safe: no flex gap, grid, custom properties, inset, aspect-ratio, sticky or backdrop
  * filters; motion is transform and opacity only.
+ * Kept light for TV GPUs: no blurred shadows, no endless animations, short transitions.
  */
 html.k-ui,html.k-ui body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000}
 html.k-ui body{color:#fff;font-family:"SamsungOne","Samsung Sans","SamsungOneUI","TizenSans",Inter,Roboto,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased;cursor:none}
 #kitsune{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden;background:#000;-webkit-transform-origin:0 0;transform-origin:0 0}
 #kitsune *{box-sizing:border-box}
 #kitsune img{display:block}
-.k-screen{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden}
-.k-page{position:absolute;left:0;top:0;width:1920px;transition:transform .36s cubic-bezier(.2,.7,.2,1);will-change:transform}
+.k-screens,.k-slot,.k-screen{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden}
+/* Screens kept for Back, and everything under the player: laid out but not painted. */
+.k-off{visibility:hidden}
+.k-page{position:absolute;left:0;top:0;width:1920px;transition:transform .24s cubic-bezier(.2,.7,.2,1);will-change:transform}
 .k-pad{padding-left:96px;padding-right:96px}
 .k-dim{color:#A7A7B1}
 .k-faint{color:#6D6D77}
@@ -56,14 +59,12 @@ html.k-ui body{color:#fff;font-family:"SamsungOne","Samsung Sans","SamsungOneUI"
 
 /* Hero */
 .k-hero{position:relative;width:1920px;height:900px;overflow:hidden;background:#0E0E11}
-.k-hero-art{position:absolute;left:0;top:0;width:1920px;height:1080px;opacity:0;transition:opacity .7s}
+.k-hero-art{position:absolute;left:0;top:0;width:1920px;height:1080px;opacity:0;transition:opacity .6s}
 .k-hero-art.on{opacity:1}
 .k-hero-art img{width:100%;height:100%;object-fit:cover;object-position:center top}
-.k-hero-art.on img{-webkit-animation:kb 9s linear forwards;animation:kb 9s linear forwards}
-@-webkit-keyframes kb{from{-webkit-transform:scale(1.02)}to{-webkit-transform:scale(1.1)}}
-@keyframes kb{from{transform:scale(1.02)}to{transform:scale(1.1)}}
 .k-hero-fade{position:absolute;left:0;top:0;width:1920px;height:900px;background:linear-gradient(90deg,rgba(0,0,0,.92) 0%,rgba(0,0,0,.6) 34%,rgba(0,0,0,0) 62%)}
-.k-hero-floor{position:absolute;left:0;bottom:0;width:1920px;height:420px;background:linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.75) 55%,#000)}
+/* Fully black before the first rail starts, so a short rail (Continue Watching with a card or two) sits on black, not on the art. */
+.k-hero-floor{position:absolute;left:0;bottom:0;width:1920px;height:440px;background:linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.6) 40%,#000 72%)}
 .k-hero-info{position:absolute;left:96px;bottom:200px;width:900px}
 .k-hero-logo{max-width:640px;max-height:220px;object-fit:contain;object-position:left bottom;margin-bottom:22px}
 .k-hero-meta{margin-top:6px}
@@ -78,17 +79,18 @@ html.k-ui body{color:#fff;font-family:"SamsungOne","Samsung Sans","SamsungOneUI"
 .k-rail.first{margin-top:-150px;position:relative}
 .k-rail-head{padding:0 96px;margin-bottom:20px}
 .k-rail-view{overflow:hidden;padding:18px 0 22px;margin:-18px 0 -22px}
-.k-track{display:flex;padding-left:96px;transition:transform .32s cubic-bezier(.2,.7,.2,1);will-change:transform}
+.k-track{display:flex;padding-left:96px;transition:transform .22s cubic-bezier(.2,.7,.2,1);will-change:transform}
 .k-track>*{flex-shrink:0;margin-right:26px}
 .k-skel{background:#121215;border-radius:12px}
 
 /* Cards */
-.k-card{position:relative;transition:transform .18s cubic-bezier(.2,.7,.2,1)}
-.k-art{position:relative;overflow:hidden;border-radius:12px;background:#16161A;transition:box-shadow .18s}
+.k-card{position:relative;transition:transform .14s cubic-bezier(.2,.7,.2,1)}
+.k-art{position:relative;overflow:hidden;border-radius:12px;background:#16161A}
 .k-art img{width:100%;height:100%;object-fit:cover}
 .k-card.f{-webkit-transform:scale(1.07);transform:scale(1.07);z-index:2}
-.k-card.f .k-art{box-shadow:0 0 0 4px #fff,0 18px 40px rgba(0,0,0,.6)}
-.k-card .k-cap{margin-top:14px;opacity:.75;transition:opacity .18s}
+/* A solid ring: a blurred drop shadow repaints the whole card on every move on a TV. */
+.k-card.f .k-art{box-shadow:0 0 0 4px #fff}
+.k-card .k-cap{margin-top:14px;opacity:.75}
 .k-card.f .k-cap{opacity:1}
 .k-bar{position:absolute;left:0;right:0;bottom:0;height:6px;background:rgba(255,255,255,.25)}
 .k-bar i{display:block;height:100%;background:#FF6B3D}
@@ -110,6 +112,10 @@ html.k-ui body{color:#fff;font-family:"SamsungOne","Samsung Sans","SamsungOneUI"
 .k-search.f{border-color:#fff;background:#1F1F24;-webkit-transform:scale(1.02);transform:scale(1.02)}
 .k-search input{flex:1;height:80px;margin-left:18px;border:0;outline:0;background:transparent;color:#fff;font-size:30px;font-family:inherit}
 .k-search input::-webkit-input-placeholder{color:#6D6D77}
+/* The TV's keyboard covers the lower half: the nav steps aside and the search page lifts, so the
+   field and the first row of results stay in view while typing. */
+.k-typing .k-nav{opacity:0}
+.k-typing .k-lift{-webkit-transform:translate3d(0,-200px,0)!important;transform:translate3d(0,-200px,0)!important}
 .k-tile{position:relative;width:330px;height:150px;border-radius:14px;overflow:hidden;padding:20px 22px;display:flex;align-items:flex-end;font-size:26px;font-weight:700;transition:transform .18s;border:1px solid rgba(255,255,255,.08)}
 .k-tile.f{-webkit-transform:scale(1.07);transform:scale(1.07);box-shadow:0 0 0 4px #fff}
 

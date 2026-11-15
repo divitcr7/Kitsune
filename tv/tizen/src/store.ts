@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Episode, ImageSet, Show } from '@/lib/catalog';
 
 /*
@@ -99,14 +99,35 @@ export const store = {
   },
 };
 
-/** Subscribes a component to a slice of the store. */
+/**
+ * Subscribes a component to a slice of the store. It re-renders only when its slice changes, so
+ * progress saved every few seconds during playback doesn't redraw the screens behind the player.
+ */
 export function useStore<T>(pick: (s: State) => T): T {
-  const [value, setValue] = useState(() => pick(state));
+  const [, redraw] = useState(0);
+  const value = pick(state);
+  const seenRef = useRef({ pick, value });
   useEffect(() => {
-    setValue(() => pick(state));
-    return store.subscribe(() => setValue(() => pick(state)));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    seenRef.current = { pick, value };
+  });
+  useEffect(
+    () =>
+      store.subscribe(() => {
+        if (seenRef.current.pick(state) !== seenRef.current.value) redraw((n) => n + 1);
+      }),
+    [],
+  );
   return value;
+}
+
+/** History, most recent first. */
+export function byRecent(history: Record<string, HistoryEntry>) {
+  return Object.values(history).sort((a, b) => b.at - a.at);
+}
+
+/** Which episodes a list holds, in order, as one string: a screen selecting it redraws when that changes, not when a time does. */
+export function orderOf(list: HistoryEntry[]) {
+  return list.map((e) => e.episode.id).join('|');
 }
 
 export function resumePoint(p?: Progress) {

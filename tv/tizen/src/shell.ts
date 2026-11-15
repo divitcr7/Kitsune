@@ -1,3 +1,4 @@
+import { isTyping } from './keys';
 import css from './styles.css';
 
 /**
@@ -67,8 +68,12 @@ export function quietDialogs() {
 
 /** Fits a 1920x1080 canvas to whatever size the TV's browser window really is. */
 export function fit(el: HTMLElement) {
+  let last = 0;
   const apply = () => {
-    const s = Math.min(window.innerWidth / 1920, window.innerHeight / 1080) || 1;
+    // The TV's on-screen keyboard makes the window shorter while it's up. The canvas keeps its size
+    // and runs on under the keyboard, rather than shrinking into the space above it.
+    const s = (isTyping() && last) || Math.min(window.innerWidth / 1920, window.innerHeight / 1080) || 1;
+    last = s;
     const t = Math.abs(s - 1) < 0.005 ? '' : `scale(${s})`;
     el.style.transform = t;
     (el.style as unknown as Record<string, string>).webkitTransform = t;

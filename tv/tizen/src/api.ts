@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api } from './miruro';
+import { useShown } from './ui/showing';
 
 export { api };
 
@@ -50,30 +51,55 @@ export function load<T>(key: string, fn: () => Promise<T>, stale = 5 * 60_000, p
 }
 
 type Result<T> = { data: T | undefined; error: boolean; loading: boolean };
+type Held<T> = Result<T> & { key: string | null };
 
+function cached<T>(key: string | null, persist: boolean): Held<T> {
+  const hit = key ? read(key, persist) : undefined;
+  return { key, data: hit?.data as T | undefined, error: false, loading: !hit };
+}
+
+/**
+ * Cached data for a screen, refreshed in the background once it's older than `stale`. Screens stay
+ * mounted behind others, so the check runs again whenever the screen comes back into view, and a
+ * refresh that brings the same data doesn't redraw it.
+ */
 export function useData<T>(key: string | null, fn: () => Promise<T>, opts: { stale?: number; persist?: boolean } = {}): Result<T> {
   const { stale = 5 * 60_000, persist = false } = opts;
-  const initial = key ? read(key, persist) : undefined;
-  const [result, setResult] = useState<Result<T>>({ data: initial?.data as T | undefined, error: false, loading: !initial });
+  const shown = useShown();
+  const [held, setHeld] = useState<Held<T>>(() => cached<T>(key, persist));
+  // A new key starts from whatever is cached for it.
+  const result = held.key === key ? held : cached<T>(key, persist);
 
   useEffect(() => {
     if (!key) return;
     let live = true;
-    const hit = read(key, persist);
-    setResult({ data: hit?.data as T | undefined, error: false, loading: !hit });
-    if (!hit || Date.now() - hit.at >= stale) {
+    let fetching = false;
+    const check = () => {
+      if (!shown.on || fetching) return;
+      const hit = read(key, persist);
+      // Something fetched while this screen was out of view is in the cache already.
+      if (hit) setHeld((h) => (h.key === key && h.data === hit.data ? h : { key, data: hit.data as T, error: false, loading: false }));
+      if (hit && Date.now() - hit.at < stale) return;
+      fetching = true;
       fn().then(
-        (data) => {
+        (fresh) => {
+          fetching = false;
+          // Unchanged data keeps its old object, so nothing downstream redraws for it.
+          const data = hit && JSON.stringify(hit.data) === JSON.stringify(fresh) ? (hit.data as T) : fresh;
           write(key, data, persist);
-          if (live) setResult({ data, error: false, loading: false });
+          if (live) setHeld((h) => (h.key === key && h.data === data ? h : { key, data, error: false, loading: false }));
         },
         () => {
-          if (live) setResult((r) => ({ data: r.data, error: true, loading: false }));
+          fetching = false;
+          if (live) setHeld((h) => ({ key, data: h.key === key ? h.data : (hit?.data as T | undefined), error: true, loading: false }));
         },
       );
-    }
+    };
+    check();
+    const off = shown.subscribe(check);
     return () => {
       live = false;
+      off();
     };
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
 
