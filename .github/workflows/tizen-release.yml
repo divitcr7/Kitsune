@@ -1,0 +1,57 @@
+name: Samsung TV release
+
+# A `tizen-vX.Y.Z` tag (pushed by scripts/publish-tizen.sh after the npm publish) builds the
+# TizenBrew module, publishes it to GitHub Packages as @divitcr7/kitsune-tizen (GitHub's npm
+# registry only takes the repo owner's scope; TVs still load @divit7/kitsune-tizen from npm), and
+# makes a GitHub release with kitsune.js attached. The release is never marked latest: the phone
+# app's updater reads only the latest release.
+
+on:
+  push:
+    tags: ['tizen-v*']
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: '@divitcr7'
+      - run: npm ci
+      - run: npm run build:tizen
+
+      - name: Tag matches the module's version
+        run: |
+          VERSION=$(node -p "require('./tv/tizen/package.json').version")
+          [ "$GITHUB_REF_NAME" = "tizen-v$VERSION" ] || { echo "Tag $GITHUB_REF_NAME doesn't match tv/tizen/package.json ($VERSION)"; exit 1; }
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Publish to GitHub Packages
+        working-directory: tv/tizen
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npm pkg set name=@divitcr7/kitsune-tizen
+          if [ "$(npm view "@divitcr7/kitsune-tizen@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+            echo "Already on GitHub Packages"
+          else
+            npm publish --registry https://npm.pkg.github.com
+          fi
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NOTES=$(node -p "require('./tv/tizen/package.json').kitsuneNotes || ''")
+          printf '%s\n\nInstall or update: in TizenBrew, add the NPM module `@divit7/kitsune-tizen` (it updates itself each time TizenBrew starts). See [tv/tizen/README.md](https://github.com/%s/blob/main/tv/tizen/README.md).\n' "$NOTES" "$GITHUB_REPOSITORY" > notes.md
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 && exit 0
+          gh release create "$GITHUB_REF_NAME" tv/tizen/dist/kitsune.js --latest=false \
+            --title "Samsung TV $VERSION" --notes-file notes.md

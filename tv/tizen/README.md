@@ -78,12 +78,12 @@ The build bundles with esbuild (Preact for the UI), lowers it to ES5 with TypeSc
 
 ## Publishing
 
-The module is published to npm as `@divit7/kitsune-tizen` (`files` ships only `dist/kitsune.js` and this README):
+The module is published to npm as `@divit7/kitsune-tizen` (`files` ships only `dist/kitsune.js` and this README). Bump `version` (and `kitsuneNotes`, the "what's new" line the TV shows once) in `tv/tizen/package.json`, commit and push, then from that commit:
 
 ```sh
-npm run build:tizen && npm publish --access public ./tv/tizen
+bash scripts/publish-tizen.sh
 ```
 
-To keep the npm login inside this project instead of `~/.npmrc`, put it in the gitignored `.npmrc.local` and point npm at it for each command: `NPM_CONFIG_USERCONFIG=$PWD/.npmrc.local npm login`, then the same prefix on `npm publish`.
+It builds, publishes to npm, clears jsDelivr's cache (TizenBrew loads the module through jsDelivr, so without this TVs keep the old version for up to a day even after a reinstall), and pushes a `tizen-vX.Y.Z` tag. The tag runs `.github/workflows/tizen-release.yml`, which makes a GitHub release with `kitsune.js` attached (never marked latest, so the phone app's updater ignores it) and publishes a copy to the repo's GitHub Packages as `@divitcr7/kitsune-tizen`.
 
-Bump `version` in `tv/tizen/package.json` for each release. TizenBrew reads the package through jsDelivr's npm mirror, which picks up a new version within minutes to hours.
+To keep the npm login inside this project instead of `~/.npmrc`, put it in the gitignored `.npmrc.local` (`NPM_CONFIG_USERCONFIG=$PWD/.npmrc.local npm login`); the script uses it when present.

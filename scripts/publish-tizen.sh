@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Publishes the Samsung TV module (tv/tizen) to npm and clears jsDelivr's cache of it, so TVs pick
 # up the new version the next time TizenBrew starts (instead of whenever the CDN cache expires).
+# Then tags the commit, which makes the GitHub release and GitHub Packages copy. Run it from the
+# pushed release commit.
 #
 #   bash scripts/publish-tizen.sh [one-time-code]
 #
@@ -23,4 +25,10 @@ npm publish --access public ${1:+--otp="$1"} ./tv/tizen
 for path in "" /package.json /dist/kitsune.js; do
   curl -fsS -o /dev/null "https://purge.jsdelivr.net/npm/$NAME$path" && echo "purged jsDelivr: npm/$NAME$path"
 done
+# The tag makes the GitHub release and the GitHub Packages copy (.github/workflows/tizen-release.yml).
+if git rev-parse -q --verify "refs/tags/tizen-v$VERSION" >/dev/null; then
+  echo "tag tizen-v$VERSION already exists"
+else
+  git tag "tizen-v$VERSION" && git push origin "tizen-v$VERSION"
+fi
 echo "Published $NAME@$VERSION"
